@@ -20,6 +20,9 @@ All three projects serve as case studies in AI-assisted software development, wi
 
 - **Radial Layout**: Apps arranged in a circular pie menu for quick access
 - **Dock Integration**: Automatically reads favorites from COSMIC dock configuration
+- **Running App Detection**: Shows which apps are currently running with arc indicators
+- **Non-Favorite Running Apps**: Displays running apps that aren't dock favorites
+- **Dynamic Sizing**: Menu radius scales based on number of apps
 - **Icon Support**: Displays app icons (SVG and PNG) with fallback to initials
 - **Hover Highlighting**: Subtle segment highlighting as you move the mouse
 - **Center Display**: Shows app name in the center when hovering
@@ -27,6 +30,7 @@ All three projects serve as case studies in AI-assisted software development, wi
 - **Keyboard Support**: Press Escape to close, or click the center
 - **System Tray**: Optional tray icon for click-to-open access
 - **Scaled Display Support**: Works correctly on HiDPI/scaled displays
+- **Suspend/Resume Safe**: Uses full-screen layer surface for reliable display
 
 ## Installation
 
@@ -153,7 +157,8 @@ cosmic-pie-menu/
 │   ├── apps.rs       # Desktop file parsing and icon lookup
 │   ├── config.rs     # COSMIC dock config reader
 │   ├── pie_menu.rs   # Radial menu UI (canvas-based)
-│   └── tray.rs       # System tray icon
+│   ├── tray.rs       # System tray icon
+│   └── windows.rs    # Running app detection via Wayland protocol
 ├── docs/
 │   ├── README.md             # Documentation overview
 │   ├── DEVELOPMENT.md        # Technical learnings
@@ -167,8 +172,9 @@ cosmic-pie-menu/
 
 ## Known Issues
 
-- **Cursor Position**: Currently opens centered on screen. Wayland security model restricts access to global cursor position.
+- **Cursor Position**: Menu opens centered on screen. Wayland security model restricts access to global cursor position. The `--track` mode attempts cursor tracking but falls back to centered after 500ms timeout.
 - **First Launch on Scaled Displays**: May briefly show incorrect size before correcting (within 500ms).
+- **Web App Detection**: Some PWAs/web apps may not be detected if their app_id doesn't match a desktop file pattern.
 
 ## Contributing
 
@@ -198,13 +204,17 @@ From developing this project, several notable patterns emerged:
 
 - **Wayland Security Model**: Unlike X11, Wayland doesn't expose global cursor position to applications. This is a security feature, not a limitation to work around. The menu opens centered instead.
 
+- **Running App Detection**: COSMIC supports `ext_foreign_toplevel_list_v1` Wayland protocol for detecting running applications. This required subprocess isolation to avoid Wayland connection conflicts with libcosmic.
+
+- **Full-Screen Layer Surface**: Using anchored full-screen surfaces (`Anchor::TOP | BOTTOM | LEFT | RIGHT`) is more reliable than fixed-size centered windows, especially after suspend/resume cycles.
+
 - **Scaled Display Challenges**: HiDPI displays (e.g., 150% scaling) cause initial layout miscalculations. Solution: skip drawing until bounds correct + timer-based layout refresh.
 
 - **Layer-Shell for Overlays**: COSMIC/Wayland's layer-shell protocol enables floating overlay windows without traditional window decorations.
 
 - **Arc Drawing Quirks**: Standard canvas `arc()` functions behaved unexpectedly. Manual line-segment approximation gave predictable results.
 
-- **Icon Discovery Complexity**: Finding the right icon involves multiple paths (system themes, Flatpak, alternate names) and format handling (SVG vs PNG).
+- **Icon Discovery Complexity**: Finding the right icon involves multiple paths (system themes, Flatpak, alternate names) and format handling (SVG vs PNG). App IDs like "Slack" need fuzzy matching to find "com.slack.Slack.desktop".
 
 ### Development Approach
 

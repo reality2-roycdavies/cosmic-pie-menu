@@ -6,7 +6,8 @@ This directory contains the complete conversation logs from developing cosmic-pi
 
 | File | Description |
 |------|-------------|
-| [session-2026-01-22.md](session-2026-01-22.md) | Main development session - from initial concept to working release |
+| [session-2026-01-22.md](session-2026-01-22.md) | Initial development session - from concept to v0.1.0 release |
+| [session-2026-01-23.md](session-2026-01-23.md) | v0.2.0 - Running app detection, stability improvements |
 
 ## About These Transcripts
 

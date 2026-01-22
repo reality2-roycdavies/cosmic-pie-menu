@@ -12,7 +12,10 @@ This document captures learnings and solutions discovered while developing cosmi
 6. [Mouse Interaction in Canvas](#mouse-interaction-in-canvas)
 7. [System Tray Integration](#system-tray-integration)
 8. [Wayland Cursor Position Challenge](#wayland-cursor-position-challenge)
-9. [Resources](#resources)
+9. [Running App Detection](#running-app-detection)
+10. [Full-Screen Layer Surface for Stability](#full-screen-layer-surface-for-stability)
+11. [Desktop File Matching](#desktop-file-matching)
+12. [Resources](#resources)
 
 ---
 
@@ -342,6 +345,152 @@ For now, the menu appears centered on screen:
 - Future enhancement could involve COSMIC-specific integration
 
 **Key insight:** Some features that were trivial in X11 require compositor-specific integration in Wayland. This is a security feature, not a bug.
+
+---
+
+## Running App Detection
+
+### The Challenge
+
+Detect which applications are currently running to show indicators (like the dock does) and include non-favorite running apps in the menu.
+
+### Discovery: Wayland Protocols
+
+COSMIC desktop supports the `ext_foreign_toplevel_list_v1` Wayland protocol, which provides information about open windows including their `app_id`.
+
+### Solution: Subprocess-Based Detection
+
+Direct Wayland connection from the pie menu process conflicts with libcosmic's connection, causing the menu to fail. Solution: query running apps via subprocess:
+
+```rust
+// Main process spawns subprocess to avoid Wayland connection conflict
+fn query_running_via_subprocess() -> HashSet<String> {
+    let exe = std::env::current_exe().unwrap_or_else(|_| "cosmic-pie-menu".into());
+    match Command::new(&exe).arg("--query-running").output() {
+        Ok(output) => {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        }
+        Err(_) => HashSet::new(),
+    }
+}
+```
+
+The `--query-running` mode connects to Wayland separately and prints app IDs:
+
+```rust
+// Wayland protocol implementation
+impl Dispatch<ExtForeignToplevelHandleV1, ()> for ToplevelState {
+    fn event(&mut self, handle: &ExtForeignToplevelHandleV1, event: Event, ...) {
+        match event {
+            Event::AppId { app_id } => {
+                self.pending_app_ids.insert(handle_id, app_id);
+            }
+            Event::Done => {
+                // Add to running apps set
+                if let Some(app_id) = self.pending_app_ids.get(&handle_id) {
+                    self.running_apps.lock().unwrap().insert(app_id.clone());
+                }
+            }
+            Event::Closed => {
+                // Remove from running apps
+            }
+            _ => {}
+        }
+    }
+}
+```
+
+**Key insight:** Multiple Wayland connections from the same process can conflict. Subprocess isolation provides clean separation.
+
+---
+
+## Full-Screen Layer Surface for Stability
+
+### The Challenge
+
+After suspend/resume, the pie menu window would exist (receiving events) but not render visibly.
+
+### Discovery Process
+
+Debug output showed the window was processing mouse hover events and keyboard input, but nothing was visible on screen:
+
+```
+DEBUG: update called with CanvasEvent(HoverSegment(Some(5)))
+DEBUG: update called with CanvasEvent(HoverSegment(Some(6)))
+DEBUG: update called with KeyPressed(Named(Escape))
+```
+
+### Solution: Full-Screen Anchored Surface
+
+The original centered mode used a fixed-size floating window:
+
+```rust
+// BEFORE: Fixed-size, unanchored (unreliable after resume)
+settings.size = Some((Some(window_size), Some(window_size)));
+settings.anchor = Anchor::empty();
+```
+
+Changing to full-screen anchored mode fixed the issue:
+
+```rust
+// AFTER: Full-screen, anchored to all edges (reliable)
+settings.anchor = Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT;
+settings.size = Some((None, None)); // Fill available space
+settings.exclusive_zone = -1;
+```
+
+The menu is drawn centered on the full-screen transparent surface.
+
+**Key insight:** Full-screen anchored layer surfaces are more reliable with Wayland compositors, especially after suspend/resume when GPU state may be stale.
+
+---
+
+## Desktop File Matching
+
+### The Challenge
+
+Running apps report app_ids like `Slack` but desktop files are named `com.slack.Slack.desktop`. Need fuzzy matching.
+
+### Solution: Multi-Strategy Lookup
+
+```rust
+fn find_desktop_file(app_id: &str) -> Option<PathBuf> {
+    // 1. Try exact match first
+    let filename = format!("{}.desktop", app_id);
+    for dir in desktop_file_dirs() {
+        let path = dir.join(&filename);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    // 2. Search for partial matches (last component)
+    let app_id_lower = app_id.to_lowercase();
+    for dir in desktop_file_dirs() {
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let name = entry.file_name().to_string_lossy();
+                if name.ends_with(".desktop") {
+                    let base = name.trim_end_matches(".desktop");
+                    // Check if last component matches (com.slack.Slack -> Slack)
+                    if let Some(last_part) = base.rsplit('.').next() {
+                        if last_part.to_lowercase() == app_id_lower {
+                            return Some(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+```
+
+**Key insight:** App IDs from Wayland don't always match desktop file names exactly. Fuzzy matching by the last component handles most cases.
 
 ---
 

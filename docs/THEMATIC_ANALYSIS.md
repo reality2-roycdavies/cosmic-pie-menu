@@ -214,6 +214,98 @@ Each project pushed into new territory while building on previous learnings. The
 
 ---
 
+## Theme 9: The Invisible Window Problem
+
+### Pattern
+
+After suspend/resume, the window existed (receiving input events) but rendered nothing visible. Debug output revealed the disconnect:
+
+```
+DEBUG: update called with CanvasEvent(HoverSegment(Some(5)))  // Mouse detected!
+DEBUG: update called with KeyPressed(Named(Escape))           // Keyboard works!
+// But nothing visible on screen
+```
+
+### Analysis
+
+GPU/compositor state after resume can be inconsistent. The window surface existed and received input, but rendering failed silently. This is a category of bug that's particularly hard to diagnose because the application logic is working correctly.
+
+### Solution
+
+Switching from fixed-size centered windows to full-screen anchored surfaces resolved the issue. The compositor handles full-screen surfaces more reliably.
+
+### Implication
+
+When dealing with compositor-level rendering issues, changing the surface creation strategy may be more effective than trying to fix rendering code.
+
+---
+
+## Theme 10: Subprocess Isolation for Wayland
+
+### Pattern
+
+Direct Wayland protocol usage (for running app detection) conflicted with libcosmic's Wayland connection:
+
+```
+// Menu appears briefly then disappears
+// Because two Wayland connections from same process conflict
+```
+
+### Solution
+
+Spawn a subprocess to make the Wayland query:
+
+```rust
+Command::new(&exe).arg("--query-running").output()
+```
+
+### Analysis
+
+Wayland connection management is complex. Libraries like libcosmic manage their own connections, and adding another connection can cause interference. Subprocess isolation provides clean separation.
+
+### Implication
+
+When integrating multiple Wayland-dependent components, consider process isolation. The overhead of subprocess spawning is trivial compared to debugging connection conflicts.
+
+---
+
+## Theme 11: Protocol Discovery for Platform Features
+
+### Pattern
+
+Detecting running apps required discovering which Wayland protocol COSMIC supports:
+
+1. First tried `zwlr_foreign_toplevel_manager_v1` - not supported by COSMIC
+2. Discovered `ext_foreign_toplevel_list_v1` via Wayland protocol inspection
+3. Implemented handler with `event_created_child!` macro for child objects
+
+### Analysis
+
+Wayland extensibility means different compositors support different protocols. COSMIC, being newer, uses the `ext_` (extension) protocols rather than `zwlr_` (wlroots-specific) ones.
+
+### Implication
+
+When implementing Wayland features, check which protocols the target compositor actually supports. Protocol names and availability vary.
+
+---
+
+## Comparative Analysis Across Three Projects (Updated)
+
+| Aspect | cosmic-bing-wallpaper | cosmic-runkat | cosmic-pie-menu |
+|--------|----------------------|---------------|-----------------|
+| Primary UI | Settings window | Tray icon only | Canvas overlay |
+| Complexity | Medium | Medium | High |
+| Platform Discovery | Config paths, D-Bus | Animation timing | Wayland protocols, layer-shell |
+| Iterations | ~5 major | ~4 major | ~10+ major |
+| Unique Challenge | Wallpaper setting API | CPU monitoring smoothing | Radial geometry, running app detection |
+| Wayland Depth | Surface | Minimal | Deep (protocols, connections) |
+
+### Trend
+
+cosmic-pie-menu pushed deepest into Wayland internals, discovering protocol-level behaviors and connection management issues that weren't relevant in simpler projects.
+
+---
+
 ## Conclusions
 
 1. **Visual feedback is essential** - UI development requires seeing results, not just reading code
@@ -227,3 +319,9 @@ Each project pushed into new territory while building on previous learnings. The
 5. **Research prevents dead ends** - Understanding platform limitations saves effort
 
 6. **Right abstraction level** - Canvas vs widgets is a fundamental choice that affects everything downstream
+
+7. **Process isolation solves connection conflicts** - When Wayland connections interfere, subprocess separation is clean
+
+8. **Surface strategy matters** - Full-screen anchored surfaces are more reliable than floating windows
+
+9. **Protocol support varies** - Check what the target compositor actually supports, not just what protocols exist
