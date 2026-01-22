@@ -5,6 +5,17 @@ A radial/pie menu app launcher for the [COSMIC desktop environment](https://syst
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)
 
+## About This Project
+
+This project was developed collaboratively between **Dr. Roy C. Davies** and **Claude** (Anthropic's AI assistant) using [Claude Code](https://claude.ai/claude-code). The entire application—from initial concept to working release—was built through natural language conversation.
+
+This is the third project in a series exploring human-AI collaboration for COSMIC desktop development:
+1. [cosmic-bing-wallpaper](https://github.com/reality2-roycdavies/cosmic-bing-wallpaper) - Daily Bing wallpaper integration
+2. [cosmic-runkat](https://github.com/reality2-roycdavies/cosmic-runkat) - Animated CPU monitor tray icon
+3. **cosmic-pie-menu** (this project) - Radial app launcher
+
+All three projects serve as case studies in AI-assisted software development, with complete documentation of the process.
+
 ## Features
 
 - **Radial Layout**: Apps arranged in a circular pie menu for quick access
@@ -143,8 +154,14 @@ cosmic-pie-menu/
 │   ├── config.rs     # COSMIC dock config reader
 │   ├── pie_menu.rs   # Radial menu UI (canvas-based)
 │   └── tray.rs       # System tray icon
+├── docs/
+│   ├── README.md             # Documentation overview
+│   ├── DEVELOPMENT.md        # Technical learnings
+│   ├── THEMATIC_ANALYSIS.md  # AI collaboration patterns
+│   └── transcripts/          # Full development conversation
 ├── Cargo.toml
 ├── cosmic-pie-menu.desktop
+├── LICENSE
 └── README.md
 ```
 
@@ -163,6 +180,41 @@ Contributions are welcome! Please feel free to submit issues and pull requests.
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
+## Development Documentation
+
+The [docs/](docs/) directory contains detailed documentation about the development process:
+
+| Document | Description |
+|----------|-------------|
+| [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Technical learnings and solutions discovered |
+| [THEMATIC_ANALYSIS.md](docs/THEMATIC_ANALYSIS.md) | Analysis of patterns in AI-assisted development |
+| [transcripts/](docs/transcripts/) | Complete conversation logs from the development session |
+
+### Key Technical Insights
+
+From developing this project, several notable patterns emerged:
+
+- **Canvas over Widgets**: Standard row/column layouts couldn't achieve true circular positioning. Canvas-based rendering with trigonometry provided full control over radial geometry.
+
+- **Wayland Security Model**: Unlike X11, Wayland doesn't expose global cursor position to applications. This is a security feature, not a limitation to work around. The menu opens centered instead.
+
+- **Scaled Display Challenges**: HiDPI displays (e.g., 150% scaling) cause initial layout miscalculations. Solution: skip drawing until bounds correct + timer-based layout refresh.
+
+- **Layer-Shell for Overlays**: COSMIC/Wayland's layer-shell protocol enables floating overlay windows without traditional window decorations.
+
+- **Arc Drawing Quirks**: Standard canvas `arc()` functions behaved unexpectedly. Manual line-segment approximation gave predictable results.
+
+- **Icon Discovery Complexity**: Finding the right icon involves multiple paths (system themes, Flatpak, alternate names) and format handling (SVG vs PNG).
+
+### Development Approach
+
+The iterative development process demonstrated effective human-AI collaboration:
+
+1. **Visual feedback loops** - UI evolved through "looks wrong" → code change → "better" cycles
+2. **Platform discovery** - AI suggests approaches, real-world testing reveals actual behavior
+3. **Scope flexibility** - Features like cursor-position menus were descoped when complexity exceeded value
+4. **Accumulated learning** - Solutions from previous projects (ksni tray, layer-shell, config paths) were directly reusable
+
 ## License
 
 This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
@@ -173,3 +225,4 @@ This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) 
 - [libcosmic](https://github.com/pop-os/libcosmic) for the UI framework
 - [iced](https://github.com/iced-rs/iced) for the underlying GUI library
 - [Kando](https://github.com/kando-menu/kando) for pie menu inspiration
+- [Claude](https://claude.ai/) (Anthropic) for AI-assisted development collaboration
