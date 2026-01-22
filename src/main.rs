@@ -12,18 +12,73 @@ mod apps;
 mod config;
 mod pie_menu;
 mod tray;
+mod windows;
 
+use std::collections::HashSet;
 use std::process::Command;
 use tray::TrayMessage;
+
+/// Query running apps via subprocess to avoid Wayland connection conflicts
+fn query_running_via_subprocess() -> HashSet<String> {
+    let exe = std::env::current_exe().unwrap_or_else(|_| "cosmic-pie-menu".into());
+    match Command::new(&exe).arg("--query-running").output() {
+        Ok(output) => {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        }
+        Err(e) => {
+            eprintln!("Failed to query running apps: {}", e);
+            HashSet::new()
+        }
+    }
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    // If --pie flag, show the pie menu directly
+    // If --pie flag, show the pie menu directly (centered)
     if args.contains(&"--pie".to_string()) {
         let favorites = config::read_favorites();
-        let apps = apps::load_apps(&favorites);
+        // Query running apps via subprocess to avoid Wayland connection conflict
+        let running = query_running_via_subprocess();
+        println!("Favorites: {}, Running: {}", favorites.len(), running.len());
+        let apps = apps::load_apps_with_running(&favorites, &running);
+        println!("Total apps to show: {}", apps.len());
         pie_menu::show_pie_menu(apps);
+        return;
+    }
+
+    // If --pie-at X Y, show the pie menu at a specific position
+    if let Some(pos) = args.iter().position(|a| a == "--pie-at") {
+        if args.len() > pos + 2 {
+            let x: f32 = args[pos + 1].parse().unwrap_or(0.0);
+            let y: f32 = args[pos + 2].parse().unwrap_or(0.0);
+            let favorites = config::read_favorites();
+            let running = query_running_via_subprocess();
+            let apps = apps::load_apps_with_running(&favorites, &running);
+            pie_menu::show_pie_menu_at(apps, Some((x, y)));
+            return;
+        }
+    }
+
+    // If --track flag, use cursor tracking to position the menu
+    if args.contains(&"--track".to_string()) {
+        let favorites = config::read_favorites();
+        let running = query_running_via_subprocess();
+        let apps = apps::load_apps_with_running(&favorites, &running);
+        pie_menu::show_pie_menu_with_tracking(apps);
+        return;
+    }
+
+    // Internal: --query-running just prints running apps and exits (for subprocess use)
+    if args.contains(&"--query-running".to_string()) {
+        let running = windows::get_running_apps();
+        for app_id in running {
+            println!("{}", app_id);
+        }
         return;
     }
 

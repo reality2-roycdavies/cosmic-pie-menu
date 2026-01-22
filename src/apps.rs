@@ -5,6 +5,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use std::collections::HashSet;
+
 /// Information about an application
 #[derive(Debug, Clone)]
 pub struct AppInfo {
@@ -18,6 +20,10 @@ pub struct AppInfo {
     pub exec: Option<String>,
     /// Path to the desktop file
     pub desktop_path: PathBuf,
+    /// Whether this app is currently running
+    pub is_running: bool,
+    /// Whether this app is a dock favorite (vs just running)
+    pub is_favorite: bool,
 }
 
 /// Get all standard locations for desktop files
@@ -49,10 +55,36 @@ fn desktop_file_dirs() -> Vec<PathBuf> {
 fn find_desktop_file(app_id: &str) -> Option<PathBuf> {
     let filename = format!("{}.desktop", app_id);
 
+    // First, try exact match
     for dir in desktop_file_dirs() {
         let path = dir.join(&filename);
         if path.exists() {
             return Some(path);
+        }
+    }
+
+    // If no exact match, search for desktop files ending with the app_id
+    // This handles cases like app_id="Slack" matching "com.slack.Slack.desktop"
+    let app_id_lower = app_id.to_lowercase();
+    for dir in desktop_file_dirs() {
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.ends_with(".desktop") {
+                    // Check if the last component before .desktop matches
+                    let base = name_str.trim_end_matches(".desktop");
+                    if let Some(last_part) = base.rsplit('.').next() {
+                        if last_part.to_lowercase() == app_id_lower {
+                            return Some(entry.path());
+                        }
+                    }
+                    // Also try case-insensitive full match
+                    if base.to_lowercase() == app_id_lower {
+                        return Some(entry.path());
+                    }
+                }
+            }
         }
     }
 
@@ -121,15 +153,88 @@ pub fn load_app_info(app_id: &str) -> Option<AppInfo> {
         icon,
         exec,
         desktop_path,
+        is_running: false,
+        is_favorite: false,
     })
 }
 
-/// Load information for multiple apps
+/// Load information for multiple apps (favorites)
 pub fn load_apps(app_ids: &[String]) -> Vec<AppInfo> {
     app_ids
         .iter()
-        .filter_map(|id| load_app_info(id))
+        .filter_map(|id| {
+            let mut app = load_app_info(id)?;
+            app.is_favorite = true;
+            Some(app)
+        })
         .collect()
+}
+
+/// Load apps with running status
+/// Returns favorites first, then running non-favorites
+pub fn load_apps_with_running(favorites: &[String], running_apps: &HashSet<String>) -> Vec<AppInfo> {
+    let mut apps = Vec::new();
+    let mut seen_ids = HashSet::new();
+
+    // First, add all favorites and mark if running
+    for id in favorites {
+        if let Some(mut app) = load_app_info(id) {
+            app.is_favorite = true;
+            app.is_running = is_app_running(id, running_apps);
+            seen_ids.insert(id.clone());
+            apps.push(app);
+        }
+    }
+
+    // Then, add running apps that aren't favorites
+    for running_id in running_apps {
+        if !seen_ids.contains(running_id) && !is_id_in_set(running_id, &seen_ids) {
+            if let Some(mut app) = load_app_info(running_id) {
+                app.is_favorite = false;
+                app.is_running = true;
+                seen_ids.insert(running_id.clone());
+                apps.push(app);
+            }
+        }
+    }
+
+    apps
+}
+
+/// Check if an app ID matches any in the running set (case-insensitive, handles variations)
+fn is_app_running(app_id: &str, running_apps: &HashSet<String>) -> bool {
+    // Direct match
+    if running_apps.contains(app_id) {
+        return true;
+    }
+
+    let app_id_lower = app_id.to_lowercase();
+    for running in running_apps {
+        // Case-insensitive match
+        if running.to_lowercase() == app_id_lower {
+            return true;
+        }
+        // Match the last part after dots (e.g., org.gnome.Nautilus -> Nautilus)
+        if let Some(name) = running.rsplit('.').next() {
+            if name.to_lowercase() == app_id_lower {
+                return true;
+            }
+        }
+        // Reverse: if app_id has dots, match its last part
+        if let Some(name) = app_id.rsplit('.').next() {
+            if running.to_lowercase() == name.to_lowercase() {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Check if an ID is already in the seen set (handles case variations)
+fn is_id_in_set(id: &str, seen: &HashSet<String>) -> bool {
+    let id_lower = id.to_lowercase();
+    seen.iter().any(|s| s.to_lowercase() == id_lower)
 }
 
 /// Find icon path for an icon name

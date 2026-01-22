@@ -1,6 +1,6 @@
 [package]
 name = "cosmic-pie-menu"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Roy C. Davies"]
 license = "GPL-3.0"
@@ -42,6 +42,10 @@ image = "0.24"
 
 # System tray (StatusNotifierItem protocol)
 ksni = { version = "0.3", features = ["blocking"] }
+
+# Wayland protocols for detecting running apps
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 
 # File system watching for config changes
 notify = "6"

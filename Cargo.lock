@@ -1082,6 +1082,8 @@ dependencies = [
  "ron 0.8.1",
  "serde",
  "tokio",
+ "wayland-client",
+ "wayland-protocols",
  "xdg 2.5.2",
 ]
 
