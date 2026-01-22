@@ -22,6 +22,7 @@ use cosmic::iced::platform_specific::shell::commands::layer_surface::{
     get_layer_surface, Anchor, KeyboardInteractivity, Layer,
 };
 use std::f32::consts::PI;
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
@@ -110,12 +111,56 @@ impl PieTheme {
     }
 
     /// Get theme based on system preference
-    /// TODO: Hook into COSMIC theme detection
     fn current() -> Self {
-        // For now, always use dark theme
-        // Later: check cosmic::theme::is_dark() or similar
-        Self::dark()
+        if is_dark_mode() {
+            Self::dark()
+        } else {
+            Self::light()
+        }
     }
+}
+
+/// Get the path to COSMIC's config directory
+fn cosmic_config_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".config/cosmic"))
+}
+
+/// Get the path to COSMIC's theme config file
+fn cosmic_theme_path() -> Option<PathBuf> {
+    cosmic_config_dir().map(|d| d.join("com.system76.CosmicTheme.Mode/v1/is_dark"))
+}
+
+/// Detect if the system is in dark mode
+fn is_dark_mode() -> bool {
+    // Try COSMIC's config file first
+    if let Some(path) = cosmic_theme_path() {
+        if let Ok(content) = fs::read_to_string(&path) {
+            return content.trim() == "true";
+        }
+    }
+
+    // Fall back to freedesktop portal
+    if let Ok(output) = Command::new("gdbus")
+        .args([
+            "call", "--session",
+            "--dest", "org.freedesktop.portal.Desktop",
+            "--object-path", "/org/freedesktop/portal/desktop",
+            "--method", "org.freedesktop.portal.Settings.Read",
+            "org.freedesktop.appearance", "color-scheme"
+        ])
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // Returns "(<uint32 1>,)" for dark, "(<uint32 0>,)" for light
+        if stdout.contains("1") {
+            return true;
+        } else if stdout.contains("0") {
+            return false;
+        }
+    }
+
+    // Default to dark mode if we can't detect
+    true
 }
 
 /// Messages for the pie menu
@@ -344,7 +389,11 @@ impl PieMenuApp {
     }
 
     fn theme(&self, _id: Id) -> Theme {
-        Theme::Dark
+        if is_dark_mode() {
+            Theme::Dark
+        } else {
+            Theme::Light
+        }
     }
 }
 
@@ -679,10 +728,16 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                                 ));
                             }
                         });
+                        // Use theme-appropriate color for running indicator
+                        let arc_color = if is_dark_mode() {
+                            Color::from_rgb(0.5, 0.5, 0.5)  // Grey for dark mode
+                        } else {
+                            Color::from_rgb(0.4, 0.4, 0.4)  // Darker grey for light mode
+                        };
                         frame.stroke(
                             &arc,
                             Stroke::default()
-                                .with_color(Color::from_rgb(0.5, 0.5, 0.5))
+                                .with_color(arc_color)
                                 .with_width(3.0),
                         );
                     }
@@ -911,7 +966,11 @@ impl CursorTracker {
     }
 
     fn theme(&self, _id: Id) -> Theme {
-        Theme::Dark
+        if is_dark_mode() {
+            Theme::Dark
+        } else {
+            Theme::Light
+        }
     }
 }
 
