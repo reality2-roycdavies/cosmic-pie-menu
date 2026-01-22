@@ -23,7 +23,7 @@ A radial/pie menu app launcher for the [COSMIC desktop environment](https://syst
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/cosmic-pie-menu.git
+git clone https://github.com/reality2-roycdavies/cosmic-pie-menu.git
 cd cosmic-pie-menu
 
 # Build in release mode
