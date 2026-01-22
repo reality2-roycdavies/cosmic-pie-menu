@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=COSMIC Pie Menu
+Comment=Radial app launcher for COSMIC desktop
+Exec=cosmic-pie-menu --pie
+Icon=cosmic-pie-menu
+Type=Application
+Categories=Utility;
+Keywords=launcher;pie;radial;menu;
+StartupNotify=false
+NoDisplay=true
