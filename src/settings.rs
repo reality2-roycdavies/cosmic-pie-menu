@@ -174,18 +174,22 @@ impl Application for SettingsApp {
                 .into(),
         ]);
 
-        widget::container(content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(24)
-            .into()
+        widget::container(
+            widget::container(content)
+                .max_width(800)
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .padding(24)
+        .into()
     }
 }
 
 /// Run the settings application
 pub fn run_settings(_shared_config: Option<crate::config::SharedConfig>) {
     let settings = cosmic::app::Settings::default()
-        .size(cosmic::iced::Size::new(650.0, 480.0));
+        .size(cosmic::iced::Size::new(850.0, 480.0));
 
     let _ = cosmic::app::run::<SettingsApp>(settings, ());
 }
