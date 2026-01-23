@@ -98,6 +98,9 @@ struct PieMenuTray {
 }
 
 impl Tray for PieMenuTray {
+    // Show menu on left-click instead of calling activate
+    const MENU_ON_ACTIVATE: bool = true;
+
     fn id(&self) -> String {
         "cosmic-pie-menu".to_string()
     }
@@ -115,6 +118,7 @@ impl Tray for PieMenuTray {
         vec![
             MenuItem::Standard(StandardItem {
                 label: "Show Pie Menu".to_string(),
+                icon_name: "view-app-grid-symbolic".to_string(),
                 activate: Box::new(|tray: &mut Self| {
                     // Menu click doesn't have cursor pos, use 0,0 (will center)
                     let _ = tray.tx.send(TrayMessage::ShowPieMenu { x: 0, y: 0 });
@@ -124,6 +128,7 @@ impl Tray for PieMenuTray {
             MenuItem::Separator,
             MenuItem::Standard(StandardItem {
                 label: "Settings...".to_string(),
+                icon_name: "preferences-system-symbolic".to_string(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.tx.send(TrayMessage::OpenSettings);
                 }),
@@ -132,6 +137,7 @@ impl Tray for PieMenuTray {
             MenuItem::Separator,
             MenuItem::Standard(StandardItem {
                 label: "Quit".to_string(),
+                icon_name: "application-exit-symbolic".to_string(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.tx.send(TrayMessage::Quit);
                 }),
@@ -147,7 +153,7 @@ impl Tray for PieMenuTray {
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
             title: "COSMIC Pie Menu".to_string(),
-            description: "Right-click for menu, use touchpad gesture to show pie menu".to_string(),
+            description: "Click for menu, use touchpad gesture to show pie menu".to_string(),
             ..Default::default()
         }
     }
