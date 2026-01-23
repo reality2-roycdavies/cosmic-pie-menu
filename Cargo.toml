@@ -1,6 +1,6 @@
 [package]
 name = "cosmic-pie-menu"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 authors = ["Roy C. Davies"]
 license = "GPL-3.0"
@@ -47,6 +47,9 @@ ksni = { version = "0.3", features = ["blocking"] }
 # Wayland protocols for detecting running apps
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+
+# COSMIC-specific protocols for window activation
+cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols.git" }
 
 # File system watching for config changes
 notify = "6"

@@ -1029,7 +1029,7 @@ version = "0.1.0"
 source = "git+https://github.com/pop-os/cosmic-protocols?rev=d0e95be#d0e95be25e423cfe523b11111a3666ed7aaf0dc4"
 dependencies = [
  "bitflags 2.10.0",
- "cosmic-protocols",
+ "cosmic-protocols 0.1.0",
  "libc",
  "smithay-client-toolkit 0.20.0",
  "wayland-client",
@@ -1084,6 +1084,7 @@ dependencies = [
 name = "cosmic-pie-menu"
 version = "0.3.1"
 dependencies = [
+ "cosmic-protocols 0.2.0",
  "dirs 6.0.0",
  "evdev",
  "freedesktop-desktop-entry",
@@ -1106,6 +1107,20 @@ dependencies = [
 name = "cosmic-protocols"
 version = "0.1.0"
 source = "git+https://github.com/pop-os/cosmic-protocols?rev=d0e95be#d0e95be25e423cfe523b11111a3666ed7aaf0dc4"
+dependencies = [
+ "bitflags 2.10.0",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "wayland-scanner",
+ "wayland-server",
+]
+
+[[package]]
+name = "cosmic-protocols"
+version = "0.2.0"
+source = "git+https://github.com/pop-os/cosmic-protocols.git#160b086abe03cd34a8a375d7fbe47b24308d1f38"
 dependencies = [
  "bitflags 2.10.0",
  "wayland-backend",

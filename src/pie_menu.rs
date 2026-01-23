@@ -29,6 +29,7 @@ use std::time::Duration;
 use std::sync::{Arc, Mutex};
 
 use crate::apps::{AppInfo, find_icon_path};
+use crate::windows;
 
 /// Icon size for the pie menu
 const ICON_SIZE: u16 = 48;
@@ -219,6 +220,7 @@ pub enum Message {
 pub enum PieCanvasMessage {
     HoverSegment(Option<usize>),
     ClickSegment(usize),
+    RightClickSegment(usize),
     ClickCenter,
 }
 
@@ -364,6 +366,28 @@ impl PieMenuApp {
             }
             Message::CanvasEvent(PieCanvasMessage::ClickSegment(index)) => {
                 return self.update(Message::LaunchApp(index));
+            }
+            Message::CanvasEvent(PieCanvasMessage::RightClickSegment(index)) => {
+                if let Some(app) = self.apps.get(index) {
+                    if app.is_running {
+                        // Switch to existing window
+                        println!("Switching to: {}", app.name);
+                        match windows::activate_window_by_app_id(&app.id) {
+                            Ok(true) => {
+                                std::process::exit(0);
+                            }
+                            Ok(false) => {
+                                eprintln!("No window found for {}", app.id);
+                                // Do nothing - menu stays open
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to activate: {}", e);
+                            }
+                        }
+                    }
+                    // Non-running app: do nothing on right-click
+                }
+                Task::none()
             }
             Message::CanvasEvent(PieCanvasMessage::ClickCenter) => {
                 return self.update(Message::Close);
@@ -545,6 +569,14 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                     return (
                         canvas::event::Status::Captured,
                         Some(Message::CanvasEvent(PieCanvasMessage::ClickSegment(slice.index))),
+                    );
+                }
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                if let Some(slice) = hovered_slice {
+                    return (
+                        canvas::event::Status::Captured,
+                        Some(Message::CanvasEvent(PieCanvasMessage::RightClickSegment(slice.index))),
                     );
                 }
             }

@@ -25,6 +25,7 @@ All three projects serve as case studies in AI-assisted software development, wi
 - **Dock Integration**: Automatically reads favorites from COSMIC dock configuration
 - **Dock Applets**: Includes App Library, Launcher, and Workspaces buttons from your dock
 - **Running App Detection**: Shows which apps are currently running with arc indicators
+- **Right-Click to Switch**: Right-click a running app to switch to its window instead of launching a new instance
 - **Non-Favorite Running Apps**: Displays running apps that aren't dock favorites
 - **Dynamic Sizing**: Menu radius scales based on number of apps
 - **Dynamic Icon Positioning**: Icons positioned optimally based on pie size
@@ -192,7 +193,8 @@ EOF
 3. Detects running applications via Wayland's `ext_foreign_toplevel_list_v1` protocol
 4. Parses `.desktop` files to get app names, icons, and launch commands
 5. Displays apps in a radial layout using libcosmic's layer-shell support
-6. Click an app segment to launch it, or click the center/press Escape to close
+6. Left-click an app segment to launch it, right-click a running app to switch to it
+7. Click the center or press Escape to close
 
 ## Configuration
 
@@ -316,6 +318,8 @@ From developing this project, several notable patterns emerged:
 - **Gesture Detection via evdev**: Linux evdev subsystem provides raw touchpad events (BTN_TOOL_TRIPLETAP, BTN_TOOL_QUADTAP, ABS_MT_POSITION) independent of compositor handling. Distinguishing taps from swipes requires tracking both duration and finger movement.
 
 - **Running App Detection**: COSMIC supports `ext_foreign_toplevel_list_v1` Wayland protocol for detecting running applications. This required subprocess isolation to avoid Wayland connection conflicts with libcosmic.
+
+- **Window Activation**: Right-click to switch uses COSMIC's `zcosmic_toplevel_manager_v1` protocol with `zcosmic_toplevel_info_v1` for window enumeration. This is a COSMIC-specific extension that allows activating existing windows by app_id.
 
 - **Full-Screen Layer Surface**: Using anchored full-screen surfaces (`Anchor::TOP | BOTTOM | LEFT | RIGHT`) is more reliable than fixed-size centered windows, especially after suspend/resume cycles.
 
