@@ -4,7 +4,7 @@
 
 use cosmic::app::Core;
 use cosmic::iced::Length;
-use cosmic::widget::{self, settings, text, dropdown, icon};
+use cosmic::widget::{self, settings, text, dropdown};
 use cosmic::{Action, Application, Element, Task};
 
 use crate::config::PieMenuConfig;
@@ -52,15 +52,11 @@ impl Application for SettingsApp {
     }
 
     fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
-        vec![
-            icon::from_name("input-touchpad-symbolic")
-                .size(24)
-                .into()
-        ]
+        vec![]
     }
 
     fn header_center(&self) -> Vec<Element<'_, Self::Message>> {
-        vec![text::heading("Pie Menu Settings").into()]
+        vec![]
     }
 
     fn header_end(&self) -> Vec<Element<'_, Self::Message>> {
