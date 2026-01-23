@@ -176,9 +176,45 @@ cosmic-pie-menu/
 └── README.md
 ```
 
+## Why No Mouse Activation?
+
+Traditional pie menus (like [Kando](https://github.com/kando-menu/kando)) open at the cursor position when triggered by a mouse gesture or hotkey. This project currently opens the menu **centered on screen** instead. Here's why:
+
+### The Wayland Security Model
+
+Unlike X11, Wayland was designed with security in mind. One key restriction: **applications cannot query the global cursor position**. An app only knows where the cursor is when it's over that app's own window.
+
+This is intentional—it prevents malicious apps from tracking your mouse movements across the desktop, monitoring which windows you're using, or capturing input intended for other applications.
+
+### What This Means for Pie Menus
+
+When you press a keyboard shortcut to open the pie menu:
+1. The pie menu app starts with **no window yet**
+2. It cannot ask "where is the cursor right now?"
+3. It can only create a window and wait for cursor events *after* the window exists
+4. By then, the window is already positioned
+
+### How Other Apps Solve This
+
+- **Kando** uses shell extensions (GNOME Shell, KDE KWin) that have privileged access to cursor position and expose it via D-Bus
+- **Some apps** use a brief full-screen transparent overlay to "catch" the cursor position, then reposition—this adds latency and visual artifacts
+- **COSMIC-native apps** could potentially use compositor-specific protocols, but these don't exist yet for this purpose
+
+### Current Approach
+
+This project uses **centered positioning**, which:
+- Works reliably without compositor extensions
+- Is predictable—you always know where the menu will appear
+- Works well with keyboard shortcuts (the recommended activation method)
+
+The `--track` mode attempts cursor tracking via a transparent overlay but falls back to centered after 500ms if it can't capture the position quickly enough.
+
+### Future Possibilities
+
+If COSMIC adds a protocol for trusted apps to query cursor position (similar to how it provides `ext_foreign_toplevel_list_v1` for window detection), this project could support cursor-positioned menus. Contributions implementing compositor-specific solutions are welcome.
+
 ## Known Issues
 
-- **Cursor Position**: Menu opens centered on screen. Wayland security model restricts access to global cursor position. The `--track` mode attempts cursor tracking but falls back to centered after 500ms timeout.
 - **First Launch on Scaled Displays**: May briefly show incorrect size before correcting (within 500ms).
 - **Web App Detection**: Some PWAs/web apps may not be detected if their app_id doesn't match a desktop file pattern.
 
