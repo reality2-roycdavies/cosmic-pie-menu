@@ -62,13 +62,14 @@ sudo cp target/release/cosmic-pie-menu /usr/local/bin/
 
 ## Usage
 
-### Direct Launch
+### Command Line Options
 
-Show the pie menu directly:
-
-```bash
-cosmic-pie-menu --pie
-```
+| Option | Description |
+|--------|-------------|
+| (none) | Start tray daemon with system tray icon |
+| `--pie` | Show pie menu centered on screen |
+| `--track` | Attempt to capture cursor position, then show pie menu there (falls back to centered after 500ms) |
+| `--pie-at X Y` | Show pie menu at specific screen coordinates |
 
 ### With System Tray
 
@@ -80,12 +81,30 @@ cosmic-pie-menu
 
 Then click the tray icon to show the pie menu.
 
+### Direct Launch (Centered)
+
+Show the pie menu centered on screen:
+
+```bash
+cosmic-pie-menu --pie
+```
+
+### Direct Launch (Cursor Tracking)
+
+Attempt to show the pie menu at the cursor position:
+
+```bash
+cosmic-pie-menu --track
+```
+
+This briefly displays an invisible overlay to capture the cursor position, then shows the menu there. If cursor capture fails within 500ms, it falls back to centered. See [Why No Mouse Activation?](#why-no-mouse-activation) for details on Wayland limitations.
+
 ### Keyboard Shortcut (Recommended)
 
 1. Open **COSMIC Settings**
 2. Navigate to **Keyboard** → **Keyboard Shortcuts**
 3. Add a custom shortcut:
-   - **Command**: `cosmic-pie-menu --pie`
+   - **Command**: `cosmic-pie-menu --track` (or `--pie` for always-centered)
    - **Shortcut**: Your preferred key combo (e.g., `Super+Space` or `Ctrl+Alt+P`)
 
 ### Autostart
