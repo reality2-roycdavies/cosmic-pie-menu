@@ -39,8 +39,6 @@ pub enum TrayMessage {
     ShowPieMenu { x: i32, y: i32 },
     /// User clicked "Settings"
     OpenSettings,
-    /// User clicked "About"
-    ShowAbout,
     /// User clicked "Quit"
     Quit,
 }
@@ -128,13 +126,6 @@ impl Tray for PieMenuTray {
                 label: "Settings...".to_string(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.tx.send(TrayMessage::OpenSettings);
-                }),
-                ..Default::default()
-            }),
-            MenuItem::Standard(StandardItem {
-                label: "About".to_string(),
-                activate: Box::new(|tray: &mut Self| {
-                    let _ = tray.tx.send(TrayMessage::ShowAbout);
                 }),
                 ..Default::default()
             }),

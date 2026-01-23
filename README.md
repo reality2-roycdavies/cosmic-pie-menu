@@ -21,7 +21,7 @@ All three projects serve as case studies in AI-assisted software development, wi
 ## Features
 
 - **Radial Layout**: Apps arranged in a circular pie menu for quick access
-- **Touchpad Gesture**: Four-finger tap to open menu at cursor position
+- **Touchpad Gesture**: Configurable 3 or 4 finger tap to open menu at cursor position
 - **Dock Integration**: Automatically reads favorites from COSMIC dock configuration
 - **Dock Applets**: Includes App Library, Launcher, and Workspaces buttons from your dock
 - **Running App Detection**: Shows which apps are currently running with arc indicators
@@ -66,7 +66,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 ### Gesture Detection Setup
 
-To enable four-finger tap gesture detection, your user must be in the `input` group:
+To enable touchpad gesture detection (3 or 4 finger tap, configurable via Settings), your user must be in the `input` group:
 
 ```bash
 sudo gpasswd -a $USER input
@@ -110,61 +110,38 @@ sudo cp target/release/cosmic-pie-menu /usr/local/bin/
 
 ## Usage
 
-### Command Line Options
+### Starting the Daemon
 
-| Option | Description |
-|--------|-------------|
-| (none) | Start tray daemon with system tray icon and gesture detection |
-| `--pie` | Show pie menu centered on screen |
-| `--track` | Show invisible overlay, capture cursor on mouse move, then show pie menu there |
-| `--pie-at X Y` | Show pie menu at specific screen coordinates |
-
-### With System Tray (Recommended)
-
-Run the daemon with tray icon:
+Simply run:
 
 ```bash
 cosmic-pie-menu
 ```
 
 This starts the background daemon which provides:
-- **System tray icon**: Click to show the pie menu
-- **Four-finger tap gesture**: Tap with four fingers on your touchpad, then move mouse to position and release
+- **System tray icon**: Click to show the pie menu, right-click for settings
+- **Touchpad gesture**: Tap with configured number of fingers on your touchpad
 
 ### Gesture Workflow
 
-1. **Four-finger tap** on touchpad - tray icon turns cyan
+1. **Multi-finger tap** on touchpad (3 or 4 fingers, configurable) - tray icon turns cyan
 2. **Move mouse** to where you want the menu
 3. **Lift fingers** or **single tap** - menu appears at cursor position
 4. **Press Escape** to cancel without showing menu
 
-The gesture detection distinguishes taps from swipes - a four-finger swipe to change workspaces won't trigger the menu.
+The gesture detection distinguishes taps from swipes - a multi-finger swipe to change workspaces won't trigger the menu.
 
-### Direct Launch (Centered)
+### Keyboard Shortcut
 
-Show the pie menu centered on screen:
-
-```bash
-cosmic-pie-menu --pie
-```
-
-### Direct Launch (Cursor Tracking)
-
-Attempt to show the pie menu at the cursor position:
-
-```bash
-cosmic-pie-menu --track
-```
-
-This briefly displays an invisible overlay to capture the cursor position, then shows the menu there. If cursor capture fails within 500ms, it falls back to centered. See [Why No Mouse Activation?](#why-no-mouse-activation) for details on Wayland limitations.
-
-### Keyboard Shortcut (Recommended)
+You can also add a keyboard shortcut to show the pie menu:
 
 1. Open **COSMIC Settings**
 2. Navigate to **Keyboard** → **Keyboard Shortcuts**
 3. Add a custom shortcut:
-   - **Command**: `cosmic-pie-menu --track` (or `--pie` for always-centered)
+   - **Command**: `cosmic-pie-menu --track`
    - **Shortcut**: Your preferred key combo (e.g., `Super+Space` or `Ctrl+Alt+P`)
+
+The `--track` option briefly displays an invisible overlay to capture the cursor position, then shows the menu there.
 
 ### Autostart
 
@@ -194,13 +171,25 @@ EOF
 
 ## Configuration
 
-Currently, the pie menu reads directly from the COSMIC dock favorites. To change which apps appear:
+### Settings Window
+
+Right-click the system tray icon and select **Settings** to open the configuration window. Settings are saved to `~/.config/cosmic-pie-menu/config.json` and take effect immediately (hot-reload).
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| **Finger Count** | Number of fingers for tap gesture (3 or 4) | 4 |
+| **Tap Duration** | Maximum time for tap gesture in ms (100-500) | 200ms |
+| **Movement Threshold** | Maximum finger movement during tap in touchpad units (200-1000) | 500 |
+
+Lower tap duration values require quicker taps. Higher movement threshold allows more finger movement during the tap (useful if your taps aren't perfectly still).
+
+### Dock Apps
+
+The pie menu displays apps from your COSMIC dock configuration:
 
 1. Open COSMIC Settings → Dock
 2. Add or remove apps from your dock favorites
 3. The pie menu will reflect these changes on next launch
-
-Future versions may include a dedicated settings interface.
 
 ## Building
 
@@ -215,8 +204,8 @@ cargo build
 # Release build (recommended)
 cargo build --release
 
-# Run directly
-cargo run -- --pie
+# Run the tray daemon
+cargo run
 ```
 
 ## Project Structure
@@ -226,9 +215,10 @@ cosmic-pie-menu/
 ├── src/
 │   ├── main.rs       # Entry point and tray event loop
 │   ├── apps.rs       # Desktop file parsing and icon lookup
-│   ├── config.rs     # COSMIC dock config reader
+│   ├── config.rs     # Config loading (dock favorites + gesture settings)
 │   ├── gesture.rs    # Touchpad gesture detection (evdev)
 │   ├── pie_menu.rs   # Radial menu UI (canvas-based)
+│   ├── settings.rs   # Settings window UI
 │   ├── tray.rs       # System tray icon with gesture feedback
 │   └── windows.rs    # Running app detection via Wayland protocol
 ├── docs/
@@ -298,7 +288,7 @@ From developing this project, several notable patterns emerged:
 
 - **Wayland Security Model**: Unlike X11, Wayland doesn't expose global cursor position to applications. Solved via transparent overlay that captures cursor on mouse movement.
 
-- **Gesture Detection via evdev**: Linux evdev subsystem provides raw touchpad events (BTN_TOOL_QUADTAP, ABS_MT_POSITION) independent of compositor handling. Distinguishing taps from swipes requires tracking both duration and finger movement.
+- **Gesture Detection via evdev**: Linux evdev subsystem provides raw touchpad events (BTN_TOOL_TRIPLETAP, BTN_TOOL_QUADTAP, ABS_MT_POSITION) independent of compositor handling. Distinguishing taps from swipes requires tracking both duration and finger movement.
 
 - **Running App Detection**: COSMIC supports `ext_foreign_toplevel_list_v1` Wayland protocol for detecting running applications. This required subprocess isolation to avoid Wayland connection conflicts with libcosmic.
 
