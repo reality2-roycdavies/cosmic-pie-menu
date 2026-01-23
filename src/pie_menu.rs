@@ -36,8 +36,11 @@ const ICON_SIZE: u16 = 48;
 /// Minimum radius of the pie menu circle (for small number of apps)
 const MIN_MENU_RADIUS: f32 = 100.0;
 
-/// Inner radius (for the center area)
-const INNER_RADIUS: f32 = 50.0;
+/// Minimum inner radius (for the center area with few apps)
+const MIN_INNER_RADIUS: f32 = 50.0;
+
+/// Ratio of inner radius to menu radius (for proportional scaling)
+const INNER_RADIUS_RATIO: f32 = 0.4;
 
 /// Spacing between icons on the circumference
 const ICON_SPACING: f32 = 100.0;
@@ -55,15 +58,22 @@ fn calculate_menu_radius(num_apps: usize) -> f32 {
     calculated.max(MIN_MENU_RADIUS)
 }
 
+/// Calculate the inner radius based on menu radius
+/// Scales proportionally to maintain visual balance as menu grows
+fn calculate_inner_radius(menu_radius: f32) -> f32 {
+    let proportional = menu_radius * INNER_RADIUS_RATIO;
+    proportional.max(MIN_INNER_RADIUS)
+}
+
 /// Calculate the radius at which icons should be placed
 /// Uses a formula that keeps icons visually centered in their segment
 /// regardless of pie size, with slight outward bias for larger pies
-fn calculate_icon_radius(menu_radius: f32, num_apps: usize) -> f32 {
-    // The segment spans from INNER_RADIUS to menu_radius
-    let segment_depth = menu_radius - INNER_RADIUS;
+fn calculate_icon_radius(menu_radius: f32, inner_radius: f32, num_apps: usize) -> f32 {
+    // The segment spans from inner_radius to menu_radius
+    let segment_depth = menu_radius - inner_radius;
 
     // Base position: center of segment
-    let center = INNER_RADIUS + segment_depth / 2.0;
+    let center = inner_radius + segment_depth / 2.0;
 
     // Add outward bias that increases slightly with more apps
     // (narrower segments benefit from icons closer to edge)
@@ -238,6 +248,8 @@ struct PieMenuApp {
     full_screen: bool,
     /// Dynamic menu radius based on number of apps
     menu_radius: f32,
+    /// Dynamic inner radius (scales with menu size)
+    inner_radius: f32,
 }
 
 impl PieMenuApp {
@@ -247,6 +259,7 @@ impl PieMenuApp {
 
     fn new_at(apps: Vec<AppInfo>, position: Option<(f32, f32)>) -> (Self, Task<Message>) {
         let menu_radius = calculate_menu_radius(apps.len());
+        let inner_radius = calculate_inner_radius(menu_radius);
         let menu_size = (menu_radius * 2.0 + ICON_SIZE as f32 + 80.0) as f32;
         // Always use full-screen mode for better layer surface compatibility
         let full_screen = true;
@@ -277,7 +290,7 @@ impl PieMenuApp {
                 let end_angle = angle + slice_angle / 2.0;
 
                 // Calculate icon position using dynamic formula
-                let icon_radius = calculate_icon_radius(menu_radius, num_apps);
+                let icon_radius = calculate_icon_radius(menu_radius, inner_radius, num_apps);
                 let icon_pos = Point::new(
                     center.x + icon_radius * angle.cos(),
                     center.y + icon_radius * angle.sin(),
@@ -309,6 +322,7 @@ impl PieMenuApp {
             cursor_position: position,
             full_screen,
             menu_radius,
+            inner_radius,
         };
 
         (app, get_layer_surface(settings))
@@ -400,6 +414,7 @@ impl PieMenuApp {
             cursor_position: self.cursor_position,
             full_screen: self.full_screen,
             menu_radius: self.menu_radius,
+            inner_radius: self.inner_radius,
             hovered_name,
         });
 
@@ -430,6 +445,8 @@ struct PieCanvas<'a> {
     full_screen: bool,
     /// Dynamic menu radius
     menu_radius: f32,
+    /// Dynamic inner radius (scales with menu size)
+    inner_radius: f32,
     /// Name of hovered app (to display in center)
     hovered_name: String,
 }
@@ -465,7 +482,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
         let distance = (dx * dx + dy * dy).sqrt();
 
         // Check if in center (close button area)
-        if distance < INNER_RADIUS {
+        if distance < self.inner_radius {
             match event {
                 Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                     return (
@@ -595,7 +612,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
 
                 // Draw the annular segment (donut slice between inner and outer radius)
                 let outer_radius = self.menu_radius + 5.0;
-                let inner_radius = INNER_RADIUS + 2.0;
+                let inner_radius = self.inner_radius + 2.0;
 
                 // Calculate the 4 corners of the annular segment
                 let outer_start = Point::new(
@@ -674,7 +691,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                 );
 
                 // Calculate icon position using dynamic formula
-                let icon_radius = calculate_icon_radius(self.menu_radius, self.slices.len());
+                let icon_radius = calculate_icon_radius(self.menu_radius, self.inner_radius, self.slices.len());
                 let icon_center = Point::new(
                     center.x + icon_radius * slice.angle.cos(),
                     center.y + icon_radius * slice.angle.sin(),
@@ -728,7 +745,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
 
                 // Draw running indicator (arc near inner circle)
                 if slice.is_running {
-                    let arc_radius = INNER_RADIUS + 8.0;
+                    let arc_radius = self.inner_radius + 8.0;
                     // Shorten the arc slightly to leave gaps between slices
                     let arc_padding = 0.08; // radians
                     let arc_start = slice.start_angle + arc_padding;
@@ -768,7 +785,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
             }
 
             // Draw inner circle (center area)
-            let inner_circle = Path::circle(center, INNER_RADIUS);
+            let inner_circle = Path::circle(center, self.inner_radius);
             frame.fill(&inner_circle, theme.center_color);
 
             // Inner circle border
