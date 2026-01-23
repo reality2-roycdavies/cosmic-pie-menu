@@ -4,7 +4,7 @@
 
 use cosmic::app::Core;
 use cosmic::iced::Length;
-use cosmic::widget::{self, settings, text, dropdown};
+use cosmic::widget::{self, settings, text, dropdown, icon};
 use cosmic::{Action, Application, Element, Task};
 
 use crate::config::PieMenuConfig;
@@ -52,7 +52,11 @@ impl Application for SettingsApp {
     }
 
     fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
-        vec![]
+        vec![
+            icon::from_name("input-touchpad-symbolic")
+                .size(24)
+                .into()
+        ]
     }
 
     fn header_center(&self) -> Vec<Element<'_, Self::Message>> {
@@ -170,22 +174,18 @@ impl Application for SettingsApp {
                 .into(),
         ]);
 
-        widget::container(
-            widget::container(content)
-                .max_width(600)
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x(Length::Fill)
-        .padding(16)
-        .into()
+        widget::container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding(24)
+            .into()
     }
 }
 
 /// Run the settings application
 pub fn run_settings(_shared_config: Option<crate::config::SharedConfig>) {
     let settings = cosmic::app::Settings::default()
-        .size(cosmic::iced::Size::new(500.0, 420.0));
+        .size(cosmic::iced::Size::new(650.0, 480.0));
 
     let _ = cosmic::app::run::<SettingsApp>(settings, ());
 }

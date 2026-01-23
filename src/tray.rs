@@ -140,15 +140,14 @@ impl Tray for PieMenuTray {
         ]
     }
 
-    fn activate(&mut self, x: i32, y: i32) {
-        // Left click shows the pie menu at cursor position
-        let _ = self.tx.send(TrayMessage::ShowPieMenu { x, y });
+    fn activate(&mut self, _x: i32, _y: i32) {
+        // Left-click does nothing - use the dropdown menu or gestures to show pie menu
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
             title: "COSMIC Pie Menu".to_string(),
-            description: "Click to show pie menu launcher".to_string(),
+            description: "Right-click for menu, use touchpad gesture to show pie menu".to_string(),
             ..Default::default()
         }
     }
