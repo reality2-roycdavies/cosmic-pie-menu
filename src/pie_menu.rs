@@ -377,15 +377,18 @@ impl PieMenuApp {
                                 std::process::exit(0);
                             }
                             Ok(false) => {
-                                eprintln!("No window found for {}", app.id);
-                                // Do nothing - menu stays open
+                                eprintln!("No window found for {}, launching new instance", app.id);
+                                // Fall through to launch new instance
+                                return self.update(Message::LaunchApp(index));
                             }
                             Err(e) => {
                                 eprintln!("Failed to activate: {}", e);
                             }
                         }
+                    } else {
+                        // Non-running app: launch it
+                        return self.update(Message::LaunchApp(index));
                     }
-                    // Non-running app: do nothing on right-click
                 }
                 Task::none()
             }
