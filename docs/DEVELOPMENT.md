@@ -15,7 +15,12 @@ This document captures learnings and solutions discovered while developing cosmi
 9. [Running App Detection](#running-app-detection)
 10. [Full-Screen Layer Surface for Stability](#full-screen-layer-surface-for-stability)
 11. [Desktop File Matching](#desktop-file-matching)
-12. [Resources](#resources)
+12. [Dock Applet Integration](#dock-applet-integration)
+13. [Theme-Aware Tray Icon](#theme-aware-tray-icon)
+14. [Dynamic Icon Positioning](#dynamic-icon-positioning)
+15. [Automatic Autostart](#automatic-autostart)
+16. [Icon Theme Search Order](#icon-theme-search-order)
+17. [Resources](#resources)
 
 ---
 
@@ -491,6 +496,176 @@ fn find_desktop_file(app_id: &str) -> Option<PathBuf> {
 ```
 
 **Key insight:** App IDs from Wayland don't always match desktop file names exactly. Fuzzy matching by the last component handles most cases.
+
+---
+
+## Dock Applet Integration
+
+### The Challenge
+
+Include COSMIC dock applets (App Library, Launcher, Workspaces) in the pie menu alongside regular app favorites.
+
+### Solution: Read Dock Plugin Configuration
+
+COSMIC stores dock applet configuration in RON format:
+
+```rust
+fn dock_plugins_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("cosmic/com.system76.CosmicPanel.Dock/v1/plugins_center"))
+}
+
+pub fn read_dock_applets() -> Vec<String> {
+    let content = fs::read_to_string(&path)?;
+    // Format: Some(["com.system76.CosmicPanelAppButton", ...])
+    ron::from_str::<Option<Vec<String>>>(&content)?.unwrap_or_default()
+}
+```
+
+### Mapping Applets to Actions
+
+Each applet ID maps to a name, command, and icon:
+
+```rust
+const DOCK_APPLETS: &[DockApplet] = &[
+    DockApplet {
+        id: "com.system76.CosmicPanelAppButton",
+        name: "App Library",
+        exec: "cosmic-app-library",
+        icon: "com.system76.CosmicPanelAppButton",
+    },
+    // ...
+];
+```
+
+**Key insight:** COSMIC provides its own icons in `/usr/share/icons/hicolor/scalable/apps/` that match the dock styling exactly.
+
+---
+
+## Theme-Aware Tray Icon
+
+### The Challenge
+
+The tray icon should adapt to light/dark mode changes in real-time, not just at startup.
+
+### Solution: Theme Detection with Polling
+
+```rust
+fn cosmic_theme_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"))
+}
+
+fn is_dark_mode() -> bool {
+    if let Ok(content) = fs::read_to_string(&path) {
+        return content.trim() == "true";
+    }
+    true // Default to dark
+}
+```
+
+The tray event loop polls for theme changes and restarts when detected:
+
+```rust
+if loop_start.duration_since(last_theme_check) > Duration::from_secs(1) {
+    let new_dark_mode = is_dark_mode();
+    if new_dark_mode != tracked_dark_mode {
+        handle.shutdown();
+        return Ok(TrayExitReason::ThemeChanged);
+    }
+}
+```
+
+**Key insight:** Polling the theme config file is simpler than file watching and sufficient for a 1-second response time.
+
+---
+
+## Dynamic Icon Positioning
+
+### The Challenge
+
+Icons appeared too close to center on larger pie menus and too far out on smaller ones.
+
+### Solution: Context-Aware Formula
+
+Instead of a fixed ratio, use a formula that considers pie size:
+
+```rust
+fn calculate_icon_radius(menu_radius: f32, num_apps: usize) -> f32 {
+    let segment_depth = menu_radius - INNER_RADIUS;
+    let center = INNER_RADIUS + segment_depth / 2.0;
+
+    // More apps = narrower segments = push icons outward
+    let bias = if num_apps <= 6 {
+        0.1  // Small pie: slight outward bias
+    } else if num_apps <= 10 {
+        0.15 // Medium pie
+    } else {
+        0.2  // Large pie: more outward bias
+    };
+
+    center + segment_depth * bias
+}
+```
+
+**Key insight:** Fixed ratios produce inconsistent visual results across different scale factors. Dynamic formulas adapt to context.
+
+---
+
+## Automatic Autostart
+
+### The Challenge
+
+Users expect the tray icon to persist across logins without manual configuration.
+
+### Solution: Create Autostart Entry on First Run
+
+```rust
+fn ensure_autostart() {
+    let desktop_file = autostart_dir.join("cosmic-pie-menu.desktop");
+
+    // Don't overwrite user modifications
+    if desktop_file.exists() {
+        return;
+    }
+
+    let content = r#"[Desktop Entry]
+Type=Application
+Name=COSMIC Pie Menu
+Exec=cosmic-pie-menu
+..."#;
+
+    fs::write(&desktop_file, content)?;
+}
+```
+
+**Key insight:** Check for existing files before creating to respect user customizations. This pattern is used consistently across COSMIC tray apps.
+
+---
+
+## Icon Theme Search Order
+
+### The Challenge
+
+Icons weren't found when they existed in the Pop or COSMIC-specific locations.
+
+### Solution: Search Multiple Themes with Priority
+
+```rust
+let icon_themes = ["Pop", "Adwaita", "hicolor", "Papirus"];
+let sizes = [&format!("{}x{}", size, size), "scalable", "symbolic"];
+
+for theme in icon_themes {
+    for sz in sizes {
+        for category in ["apps", "actions", "places", "status"] {
+            let path = format!("/usr/share/icons/{}/{}/{}/{}.svg", theme, sz, category, icon_name);
+            if Path::new(&path).exists() {
+                return Some(path.into());
+            }
+        }
+    }
+}
+```
+
+**Key insight:** Different desktop environments install icons in different locations. Search the target environment's theme first (Pop for COSMIC).
 
 ---
 

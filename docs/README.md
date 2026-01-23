@@ -39,6 +39,9 @@ From developing this project, some notable observations:
 - **Scaled display challenges** - HiDPI displays can cause initial layout miscalculations that require workarounds
 - **Layer-shell for overlays** - COSMIC/Wayland's layer-shell protocol enables floating overlay windows without traditional window decorations
 - **Icon discovery complexity** - Finding the right icon for an app involves multiple paths, alternate names, and format handling (SVG vs PNG)
+- **Platform-specific icons** - COSMIC provides its own icons that match dock styling at `/usr/share/icons/hicolor/scalable/apps/`
+- **Dynamic formulas over fixed ratios** - Layout calculations should adapt to context (number of items, available space)
+- **Project patterns transfer** - Solutions from sibling projects (autostart, theme detection) apply directly
 
 ## Unique Challenges in This Project
 
@@ -48,6 +51,9 @@ Unlike the previous projects, cosmic-pie-menu required:
 2. **Custom canvas rendering** - Drawing annular (ring) segments with proper arc calculations
 3. **Mouse hit detection** - Determining which pie segment the cursor is over based on angle calculations
 4. **Cross-display compatibility** - Handling both 100% and scaled displays with different initial bounds
+5. **Dock applet integration** - Reading COSMIC panel plugin configuration and mapping applets to actions
+6. **Dynamic icon positioning** - Formula-based positioning that adapts to pie size and number of items
+7. **Multi-theme icon discovery** - Searching Pop, Adwaita, hicolor themes with COSMIC-specific priority
 
 ## Related Resources
 

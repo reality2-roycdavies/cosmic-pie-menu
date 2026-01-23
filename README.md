@@ -1,9 +1,11 @@
 # COSMIC Pie Menu
 
-A radial/pie menu app launcher for the [COSMIC desktop environment](https://system76.com/cosmic) that mirrors your dock favorites.
+A radial/pie menu app launcher for the [COSMIC desktop environment](https://system76.com/cosmic) that mirrors your dock favorites and applets.
 
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)
+
+![COSMIC Pie Menu Screenshot](docs/images/screenshot.png)
 
 ## About This Project
 
@@ -20,15 +22,19 @@ All three projects serve as case studies in AI-assisted software development, wi
 
 - **Radial Layout**: Apps arranged in a circular pie menu for quick access
 - **Dock Integration**: Automatically reads favorites from COSMIC dock configuration
+- **Dock Applets**: Includes App Library, Launcher, and Workspaces buttons from your dock
 - **Running App Detection**: Shows which apps are currently running with arc indicators
 - **Non-Favorite Running Apps**: Displays running apps that aren't dock favorites
 - **Dynamic Sizing**: Menu radius scales based on number of apps
+- **Dynamic Icon Positioning**: Icons positioned optimally based on pie size
 - **Icon Support**: Displays app icons (SVG and PNG) with fallback to initials
 - **Hover Highlighting**: Subtle segment highlighting as you move the mouse
 - **Center Display**: Shows app name in the center when hovering
 - **Transparent Background**: Only the circular menu is visible
 - **Keyboard Support**: Press Escape to close, or click the center
-- **System Tray**: Optional tray icon for click-to-open access
+- **System Tray**: Theme-aware tray icon for click-to-open access
+- **Theme Support**: Tray icon adapts to light/dark mode changes
+- **Autostart**: Automatically creates autostart entry on first run
 - **Scaled Display Support**: Works correctly on HiDPI/scaled displays
 - **Suspend/Resume Safe**: Uses full-screen layer surface for reliable display
 
@@ -84,13 +90,11 @@ Then click the tray icon to show the pie menu.
 
 ### Autostart
 
-To start the tray daemon automatically:
+The tray daemon automatically creates an autostart entry on first run at `~/.config/autostart/cosmic-pie-menu.desktop`. After running `cosmic-pie-menu` once, it will start automatically on login.
+
+To manually set up autostart:
 
 ```bash
-# Copy desktop file to autostart
-cp cosmic-pie-menu.desktop ~/.config/autostart/
-
-# Or create manually
 mkdir -p ~/.config/autostart
 cat > ~/.config/autostart/cosmic-pie-menu.desktop << EOF
 [Desktop Entry]
@@ -103,10 +107,12 @@ EOF
 
 ## How It Works
 
-1. Reads your dock favorites from `~/.config/cosmic/com.system76.CosmicAppList/v1/favorites`
-2. Parses `.desktop` files to get app names, icons, and launch commands
-3. Displays apps in a radial layout using libcosmic's layer-shell support
-4. Click an app segment to launch it, or click the center/press Escape to close
+1. Reads dock applets from `~/.config/cosmic/com.system76.CosmicPanel.Dock/v1/plugins_center`
+2. Reads dock favorites from `~/.config/cosmic/com.system76.CosmicAppList/v1/favorites`
+3. Detects running applications via Wayland's `ext_foreign_toplevel_list_v1` protocol
+4. Parses `.desktop` files to get app names, icons, and launch commands
+5. Displays apps in a radial layout using libcosmic's layer-shell support
+6. Click an app segment to launch it, or click the center/press Escape to close
 
 ## Configuration
 

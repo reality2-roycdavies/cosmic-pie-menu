@@ -306,6 +306,113 @@ cosmic-pie-menu pushed deepest into Wayland internals, discovering protocol-leve
 
 ---
 
+## Theme 12: Icon Discovery Across Multiple Themes
+
+### Pattern
+
+Finding the correct icons required searching multiple icon themes in priority order:
+
+1. First tried standard freedesktop icon lookup - missed Pop theme icons
+2. Added direct path searches in Pop, Adwaita, hicolor themes
+3. Discovered COSMIC's own icons at `/usr/share/icons/hicolor/scalable/apps/`
+4. Final solution: search COSMIC icons first (e.g., `com.system76.CosmicPanelAppButton`)
+
+### Analysis
+
+Icon theming in Linux is complex. Different desktop environments install icons in different locations, and icon lookup libraries may not search all themes. COSMIC has its own icons that match the dock applet styling.
+
+### Implication
+
+When integrating with a desktop environment, look for that environment's specific icons first. They'll provide visual consistency with the rest of the system.
+
+---
+
+## Theme 13: Dynamic Layout Formulas
+
+### Pattern
+
+Icon positioning required a formula that adapted to varying pie sizes:
+
+| Pie Size | Formula Behavior |
+|----------|------------------|
+| Small (≤6 apps) | Icons at segment center + 10% outward |
+| Medium (7-10 apps) | Icons at segment center + 15% outward |
+| Large (>10 apps) | Icons at segment center + 20% outward |
+
+### Analysis
+
+A fixed ratio (like "72% from center") produces different visual results at different scales. With more apps, segments are narrower, so icons need to be pushed further outward to remain visually centered within their segment.
+
+### Implication
+
+For dynamic UI layouts, formulas should consider the context (number of items, available space) rather than using fixed ratios.
+
+---
+
+## Theme 14: Leveraging Existing Project Patterns
+
+### Pattern
+
+Features from sibling projects (cosmic-bing-wallpaper, cosmic-runkat) were directly applicable:
+
+| Feature | Source Project | Application |
+|---------|---------------|-------------|
+| Autostart creation | Both | `ensure_autostart()` function |
+| Theme detection | Both | Reading `CosmicTheme.Mode/v1/is_dark` |
+| Tray icon refresh | Both | Theme change detection with tray restart |
+| Config path patterns | Both | COSMIC config directory structure |
+
+### Analysis
+
+The human explicitly referenced "the other COSMIC tools" as a pattern to follow. This allowed rapid feature addition without re-discovering implementation approaches.
+
+### Implication
+
+Maintaining consistency across related projects pays dividends. Each project becomes a reference implementation for the next.
+
+---
+
+## Theme 15: Configuration Discovery Through Exploration
+
+### Pattern
+
+Finding dock applet configuration required exploring the COSMIC config structure:
+
+```
+~/.config/cosmic/com.system76.CosmicPanel.Dock/v1/plugins_center
+```
+
+Contains: `Some(["com.system76.CosmicPanelAppButton", "com.system76.CosmicPanelLauncherButton", ...])`
+
+### Analysis
+
+COSMIC uses RON format for configuration with a predictable path structure: `~/.config/cosmic/[namespace]/v1/[setting]`. Once this pattern is understood, discovering new configuration locations becomes straightforward.
+
+### Implication
+
+Understanding a platform's configuration conventions enables rapid feature discovery. The structure itself is documentation.
+
+---
+
+## Comparative Analysis Across Three Projects (Final)
+
+| Aspect | cosmic-bing-wallpaper | cosmic-runkat | cosmic-pie-menu |
+|--------|----------------------|---------------|-----------------|
+| Primary UI | Settings window | Tray icon only | Canvas overlay |
+| Complexity | Medium | Medium | High |
+| Platform Discovery | Config paths, D-Bus | Animation timing | Wayland protocols, icon themes |
+| Iterations | ~5 major | ~4 major | ~12+ major |
+| Unique Challenge | Wallpaper setting API | CPU monitoring smoothing | Radial geometry, dock integration |
+| Wayland Depth | Surface | Minimal | Deep (protocols, connections) |
+| Theme Integration | Basic | Basic | Full (tray + menu) |
+| Autostart | Yes | Yes | Yes (automatic) |
+
+### Trend
+
+cosmic-pie-menu represents the most feature-complete integration with COSMIC, including dock applet mirroring, theme-aware components, and automatic configuration.
+
+---
+
 ## Conclusions
 
 1. **Visual feedback is essential** - UI development requires seeing results, not just reading code
@@ -325,3 +432,9 @@ cosmic-pie-menu pushed deepest into Wayland internals, discovering protocol-leve
 8. **Surface strategy matters** - Full-screen anchored surfaces are more reliable than floating windows
 
 9. **Protocol support varies** - Check what the target compositor actually supports, not just what protocols exist
+
+10. **Use platform-specific icons** - Desktop environments have their own icons that provide visual consistency
+
+11. **Dynamic formulas over fixed ratios** - Layout calculations should adapt to context
+
+12. **Project patterns transfer** - Related projects serve as reference implementations for each other
