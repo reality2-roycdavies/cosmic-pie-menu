@@ -84,6 +84,23 @@ Or **log out and back in** for the change to take effect permanently.
 
 Without input group membership, the tray daemon will still work but gesture detection will be disabled.
 
+### From Release (Recommended)
+
+Download the latest pre-built binary from [GitHub Releases](https://github.com/reality2-roycdavies/cosmic-pie-menu/releases):
+
+```bash
+# Download latest release
+wget https://github.com/reality2-roycdavies/cosmic-pie-menu/releases/latest/download/cosmic-pie-menu
+
+# Make executable and install
+chmod +x cosmic-pie-menu
+sudo mv cosmic-pie-menu /usr/local/bin/
+
+# Or install to user directory
+mkdir -p ~/.local/bin
+mv cosmic-pie-menu ~/.local/bin/
+```
+
 ### From Source
 
 ```bash
@@ -112,13 +129,21 @@ sudo cp target/release/cosmic-pie-menu /usr/local/bin/
 
 ### Starting the Daemon
 
-Simply run:
+For first-time setup or testing, simply run:
 
 ```bash
 cosmic-pie-menu
 ```
 
-This starts the background daemon which provides:
+To run in the background (detached from terminal):
+
+```bash
+cosmic-pie-menu &
+```
+
+On first run, an autostart entry is created at `~/.config/autostart/cosmic-pie-menu.desktop`, so the daemon will start automatically on future logins.
+
+The daemon provides:
 - **System tray icon**: Click to show the pie menu, right-click for settings
 - **Touchpad gesture**: Tap with configured number of fingers on your touchpad
 
