@@ -10,6 +10,7 @@
 
 mod apps;
 mod config;
+mod gesture;
 mod pie_menu;
 mod tray;
 mod windows;
@@ -17,7 +18,8 @@ mod windows;
 use std::collections::HashSet;
 use std::fs;
 use std::process::Command;
-use tray::TrayMessage;
+use std::sync::mpsc;
+use tray::{GestureFeedback, TrayMessage};
 
 /// Ensure autostart desktop file exists so tray starts on login
 fn ensure_autostart() {
@@ -142,25 +144,53 @@ fn main() {
     let apps_list = apps::load_apps(&favorites);
     println!("Loaded {} apps from dock favorites", apps_list.len());
 
-    // Start the tray icon
-    let rx = match tray::run_tray() {
-        Ok(rx) => rx,
-        Err(e) => {
-            eprintln!("Failed to start tray: {}", e);
-            return;
-        }
-    };
+    // Create shared channel for tray and gesture detection
+    let (tx, rx) = mpsc::channel();
+
+    // Create shared gesture feedback state for tray icon visual feedback
+    let gesture_feedback = GestureFeedback::new();
+
+    // Start the tray icon with shared sender and feedback
+    let tray_tx = tx.clone();
+    let tray_feedback = gesture_feedback.clone();
+    std::thread::spawn(move || {
+        tray::run_tray_with_sender(tray_tx, tray_feedback);
+    });
 
     println!("Tray icon started. Click it or use the menu.");
+
+    // Start gesture detection (non-fatal if it fails)
+    match gesture::start_gesture_thread(tx, gesture_feedback.clone()) {
+        Ok(()) => println!("Gesture detection started (four-finger tap to show menu)"),
+        Err(e) => eprintln!("Gesture detection not available: {}", e),
+    }
 
     // Main event loop - handle tray messages
     loop {
         match rx.recv() {
             Ok(TrayMessage::ShowPieMenu { .. }) => {
+                // Kill any existing pie menu instances first (prevents multiple menus)
+                let _ = Command::new("pkill")
+                    .args(["-f", "cosmic-pie-menu --track"])
+                    .output();
+                let _ = Command::new("pkill")
+                    .args(["-f", "cosmic-pie-menu --pie-at"])
+                    .output();
+
                 println!("Launching pie menu overlay...");
-                // Spawn a new instance with --pie flag (centered on screen)
                 let exe = std::env::current_exe().unwrap_or_else(|_| "cosmic-pie-menu".into());
-                let _ = Command::new(exe).arg("--pie").spawn();
+
+                // Spawn menu and wait for it to exit in a background thread
+                // so we can reset the icon when it closes
+                let feedback_clone = gesture_feedback.clone();
+                std::thread::spawn(move || {
+                    if let Ok(mut child) = Command::new(exe).arg("--track").spawn() {
+                        // Wait for the tracker/menu to exit
+                        let _ = child.wait();
+                    }
+                    // Reset icon when menu closes (user selected app or pressed Escape)
+                    feedback_clone.reset();
+                });
             }
             Ok(TrayMessage::OpenSettings) => {
                 println!("Settings requested!");

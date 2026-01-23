@@ -50,6 +50,10 @@ wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 # File system watching for config changes
 notify = "6"
 
+# Input device handling for gesture detection
+evdev = "0.12"
+libc = "0.2"
+
 [profile.release]
 lto = true
 codegen-units = 1

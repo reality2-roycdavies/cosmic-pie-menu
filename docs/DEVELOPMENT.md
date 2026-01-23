@@ -20,7 +20,8 @@ This document captures learnings and solutions discovered while developing cosmi
 14. [Dynamic Icon Positioning](#dynamic-icon-positioning)
 15. [Automatic Autostart](#automatic-autostart)
 16. [Icon Theme Search Order](#icon-theme-search-order)
-17. [Resources](#resources)
+17. [Touchpad Gesture Detection](#touchpad-gesture-detection)
+18. [Resources](#resources)
 
 ---
 
@@ -669,6 +670,112 @@ for theme in icon_themes {
 
 ---
 
+## Touchpad Gesture Detection
+
+### The Challenge
+
+Enable opening the pie menu via touchpad gesture (four-finger tap) with the menu appearing at the cursor position, working around Wayland's cursor position restrictions.
+
+### Solution: evdev Direct Input Access
+
+Rather than using libinput (which abstracts gestures), we use the `evdev` crate to read raw touchpad events directly from `/dev/input/`:
+
+```rust
+use evdev::{AbsoluteAxisType, Device, InputEventKind, Key};
+
+fn is_touchpad_with_quadtap(device: &Device) -> bool {
+    let keys = device.supported_keys()?;
+    if !keys.contains(Key::BTN_TOOL_QUADTAP) {
+        return false;
+    }
+    // Must also have absolute axes (touchpad characteristic)
+    let abs = device.supported_absolute_axes()?;
+    abs.contains(AbsoluteAxisType::ABS_MT_POSITION_X)
+}
+```
+
+### Distinguishing Taps from Swipes
+
+Four-finger swipes (for workspace switching) must not trigger the menu. We track both duration and finger movement:
+
+```rust
+enum GestureState {
+    Idle,
+    FingersDown {
+        start: Instant,
+        start_x: Option<i32>,
+        start_y: Option<i32>,
+        max_movement: i32,
+    },
+}
+
+const TAP_MAX_DURATION: Duration = Duration::from_millis(250);
+const TAP_MAX_MOVEMENT: i32 = 500;  // Touchpad units
+
+fn process_event(event: &InputEvent, state: &mut GestureState) -> GestureEvent {
+    match event.kind() {
+        InputEventKind::Key(Key::BTN_TOOL_QUADTAP) => {
+            if event.value() == 1 {
+                // Fingers down - start tracking
+                *state = GestureState::FingersDown { start: Instant::now(), ... };
+            } else if event.value() == 0 {
+                // Fingers up - check if it was a tap
+                if let GestureState::FingersDown { start, max_movement, .. } = *state {
+                    if start.elapsed() <= TAP_MAX_DURATION && max_movement <= TAP_MAX_MOVEMENT {
+                        return GestureEvent::FingersUp;  // Trigger menu
+                    }
+                    // Otherwise it was a swipe - ignore
+                }
+            }
+        }
+        // Track absolute position for movement detection
+        InputEventKind::AbsAxis(AbsoluteAxisType::ABS_MT_POSITION_X) => {
+            // Update max_movement based on distance from start position
+        }
+        _ => {}
+    }
+}
+```
+
+### Gesture Workflow with Visual Feedback
+
+The gesture integrates with the tray icon for visual feedback:
+
+1. **Four fingers touch** → `BTN_TOOL_QUADTAP=1` → Tray icon turns cyan
+2. **User moves cursor** (fingers can be lifted) → Transparent overlay captures position
+3. **Menu triggered** → `BTN_TOOL_QUADTAP=0` within time/movement limits → Menu appears
+4. **Menu closes** → Tray icon returns to normal
+
+```rust
+pub struct GestureFeedback {
+    triggered: Arc<AtomicBool>,
+    reset_requested: Arc<AtomicBool>,
+}
+
+impl GestureFeedback {
+    pub fn trigger(&self) { /* Turn icon cyan */ }
+    pub fn reset(&self) { /* Return icon to normal */ }
+}
+```
+
+### Permission Requirements
+
+evdev requires read access to `/dev/input/event*` devices:
+
+```bash
+sudo gpasswd -a $USER input
+newgrp input  # Apply immediately without logout
+```
+
+### Key Insights
+
+- **evdev vs libinput**: evdev provides raw events; libinput provides gesture abstractions. For detecting specific button events like `BTN_TOOL_QUADTAP`, evdev is simpler.
+- **Tap vs swipe detection**: Time alone isn't sufficient - swipes can be quick. Tracking finger position movement provides reliable discrimination.
+- **No libinput dependency**: The evdev crate is pure Rust, reading directly from kernel input devices with no system library dependencies.
+- **Compositor-independent**: Unlike Wayland protocols, evdev access works regardless of compositor because it reads from the kernel input layer.
+
+---
+
 ## Resources
 
 ### Crates Used
@@ -677,6 +784,7 @@ for theme in icon_themes {
 - [`ksni`](https://crates.io/crates/ksni) - StatusNotifierItem (system tray) implementation
 - [`freedesktop-icons`](https://crates.io/crates/freedesktop-icons) - Icon theme lookup
 - [`ron`](https://crates.io/crates/ron) - Rusty Object Notation for COSMIC configs
+- [`evdev`](https://crates.io/crates/evdev) - Linux input device (evdev) access for gesture detection
 
 ### Documentation
 

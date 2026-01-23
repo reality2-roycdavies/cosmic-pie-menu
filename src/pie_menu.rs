@@ -887,14 +887,7 @@ impl CursorTracker {
         settings.size = Some((None, None)); // Fill available space
         settings.exclusive_zone = -1; // Don't reserve space
 
-        // Hard timeout thread - if iced's event loop is stuck, this will still fire
-        std::thread::spawn(|| {
-            std::thread::sleep(Duration::from_millis(800));
-            eprintln!("Hard timeout: cursor tracker stuck, falling back to centered menu");
-            let exe = std::env::current_exe().unwrap_or_else(|_| "cosmic-pie-menu".into());
-            let _ = Command::new(exe).arg("--pie").spawn();
-            std::process::exit(0);
-        });
+        // No timeout - wait for mouse movement (user can press Escape to cancel)
 
         let tracker = Self {
             captured: false,
@@ -952,13 +945,8 @@ impl CursorTracker {
                     }
                 }
 
-                // Timeout after 500ms - fall back to centered
-                if self.tick_count > 10 {
-                    println!("Cursor tracking timeout, falling back to centered");
-                    let exe = std::env::current_exe().unwrap_or_else(|_| "cosmic-pie-menu".into());
-                    let _ = Command::new(exe).arg("--pie").spawn();
-                    std::process::exit(0);
-                }
+                // No timeout - wait for mouse movement
+                // User can press Escape to cancel
                 Task::none()
             }
         }
@@ -979,12 +967,44 @@ impl CursorTracker {
     }
 
     fn view(&self, _id: Id) -> Element<'_, TrackerMessage> {
-        // Full-screen transparent canvas that captures mouse position
-        canvas(TrackerCanvas {
+        use cosmic::iced::widget::{container, text, Column, mouse_area};
+        use cosmic::iced::alignment::{Horizontal, Vertical};
+
+        // Full-screen canvas that captures mouse position
+        let tracker_canvas = canvas(TrackerCanvas {
             cursor_pos: self.cursor_pos.clone(),
         })
             .width(Length::Fill)
-            .height(Length::Fill)
+            .height(Length::Fill);
+
+        // Add a centered instruction hint - place BEHIND the canvas so cursor works
+        let instruction = container(
+            Column::new()
+                .push(text("Move mouse to position menu").size(18))
+                .push(text("Press Escape to cancel").size(14))
+                .align_x(Horizontal::Center)
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Horizontal::Center)
+        .align_y(Vertical::Center)
+        .style(|_theme| {
+            cosmic::iced::widget::container::Style {
+                text_color: Some(Color::from_rgba(1.0, 1.0, 1.0, 0.7)),
+                background: Some(cosmic::iced::Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.3))),
+                ..Default::default()
+            }
+        });
+
+        // Stack with instruction BEHIND canvas, then wrap in mouse_area for cursor
+        let content = cosmic::iced::widget::stack![
+            instruction,
+            tracker_canvas,
+        ];
+
+        // Wrap in mouse_area to set crosshair cursor
+        mouse_area(content)
+            .interaction(mouse::Interaction::Crosshair)
             .into()
     }
 
@@ -1048,22 +1068,33 @@ impl Program<TrackerMessage> for TrackerCanvas {
             }
         }
 
-        // Draw nothing - completely transparent
+        // Draw a very subtle background so cursor changes work
+        // Completely transparent surfaces sometimes don't register for cursor events
         use cosmic::iced::widget::canvas::Frame;
         let mut frame = Frame::new(renderer, bounds.size());
         frame.fill_rectangle(
             Point::new(0.0, 0.0),
             bounds.size(),
-            Color::TRANSPARENT,
+            Color::from_rgba(0.0, 0.0, 0.0, 0.01), // Nearly invisible
         );
         vec![frame.into_geometry()]
     }
+
+    fn mouse_interaction(
+        &self,
+        _state: &Self::State,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        // Show crosshair cursor to indicate "click to place menu here"
+        mouse::Interaction::Crosshair
+    }
 }
 
-/// Style for transparent tracker window
+/// Style for tracker window - nearly transparent but with slight tint for cursor events
 fn tracker_style(_state: &CursorTracker, _theme: &Theme) -> cosmic::iced_runtime::Appearance {
     cosmic::iced_runtime::Appearance {
-        background_color: Color::TRANSPARENT,
+        background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.01), // Nearly invisible
         text_color: Color::WHITE,
         icon_color: Color::WHITE,
     }

@@ -21,6 +21,7 @@ All three projects serve as case studies in AI-assisted software development, wi
 ## Features
 
 - **Radial Layout**: Apps arranged in a circular pie menu for quick access
+- **Touchpad Gesture**: Four-finger tap to open menu at cursor position
 - **Dock Integration**: Automatically reads favorites from COSMIC dock configuration
 - **Dock Applets**: Includes App Library, Launcher, and Workspaces buttons from your dock
 - **Running App Detection**: Shows which apps are currently running with arc indicators
@@ -40,6 +41,49 @@ All three projects serve as case studies in AI-assisted software development, wi
 
 ## Installation
 
+### Prerequisites
+
+Before building, install the required system dependencies:
+
+```bash
+# Debian/Ubuntu
+sudo apt install libwayland-dev libxkbcommon-dev libssl-dev pkg-config
+
+# Fedora
+sudo dnf install wayland-devel libxkbcommon-devel openssl-devel
+
+# Arch
+sudo pacman -S wayland libxkbcommon openssl
+```
+
+Note: Gesture detection uses the `evdev` crate which reads directly from `/dev/input/` - no libinput required.
+
+You'll also need the Rust toolchain (1.75 or later). Install via [rustup](https://rustup.rs/):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### Gesture Detection Setup
+
+To enable four-finger tap gesture detection, your user must be in the `input` group:
+
+```bash
+sudo gpasswd -a $USER input
+```
+
+Apply the change immediately (without logout):
+
+```bash
+newgrp input
+```
+
+Or **log out and back in** for the change to take effect permanently.
+
+> **Note**: This grants read access to `/dev/input/` devices. If this is a privacy or security concern for your use case, be aware of this implication.
+
+Without input group membership, the tray daemon will still work but gesture detection will be disabled.
+
 ### From Source
 
 ```bash
@@ -50,7 +94,10 @@ cd cosmic-pie-menu
 # Build in release mode
 cargo build --release
 
-# Install the binary
+# Install to user local bin (recommended)
+cp target/release/cosmic-pie-menu ~/.local/bin/
+
+# Or install system-wide
 sudo cp target/release/cosmic-pie-menu /usr/local/bin/
 ```
 
@@ -59,6 +106,7 @@ sudo cp target/release/cosmic-pie-menu /usr/local/bin/
 - Rust 1.75 or later
 - COSMIC desktop environment (or libcosmic)
 - D-Bus (for system tray)
+- Access to `/dev/input/` (for gesture detection - requires `input` group membership)
 
 ## Usage
 
@@ -66,12 +114,12 @@ sudo cp target/release/cosmic-pie-menu /usr/local/bin/
 
 | Option | Description |
 |--------|-------------|
-| (none) | Start tray daemon with system tray icon |
+| (none) | Start tray daemon with system tray icon and gesture detection |
 | `--pie` | Show pie menu centered on screen |
-| `--track` | Attempt to capture cursor position, then show pie menu there (falls back to centered after 500ms) |
+| `--track` | Show invisible overlay, capture cursor on mouse move, then show pie menu there |
 | `--pie-at X Y` | Show pie menu at specific screen coordinates |
 
-### With System Tray
+### With System Tray (Recommended)
 
 Run the daemon with tray icon:
 
@@ -79,7 +127,18 @@ Run the daemon with tray icon:
 cosmic-pie-menu
 ```
 
-Then click the tray icon to show the pie menu.
+This starts the background daemon which provides:
+- **System tray icon**: Click to show the pie menu
+- **Four-finger tap gesture**: Tap with four fingers on your touchpad, then move mouse to position and release
+
+### Gesture Workflow
+
+1. **Four-finger tap** on touchpad - tray icon turns cyan
+2. **Move mouse** to where you want the menu
+3. **Lift fingers** or **single tap** - menu appears at cursor position
+4. **Press Escape** to cancel without showing menu
+
+The gesture detection distinguishes taps from swipes - a four-finger swipe to change workspaces won't trigger the menu.
 
 ### Direct Launch (Centered)
 
@@ -145,20 +204,7 @@ Future versions may include a dedicated settings interface.
 
 ## Building
 
-### Requirements
-
-- Rust toolchain (rustup recommended)
-- System dependencies for libcosmic:
-  ```bash
-  # Debian/Ubuntu
-  sudo apt install libwayland-dev libxkbcommon-dev libssl-dev pkg-config
-
-  # Fedora
-  sudo dnf install wayland-devel libxkbcommon-devel openssl-devel
-
-  # Arch
-  sudo pacman -S wayland libxkbcommon openssl
-  ```
+See [Prerequisites](#prerequisites) for required system dependencies.
 
 ### Build Commands
 
@@ -181,8 +227,9 @@ cosmic-pie-menu/
 │   ├── main.rs       # Entry point and tray event loop
 │   ├── apps.rs       # Desktop file parsing and icon lookup
 │   ├── config.rs     # COSMIC dock config reader
+│   ├── gesture.rs    # Touchpad gesture detection (evdev)
 │   ├── pie_menu.rs   # Radial menu UI (canvas-based)
-│   ├── tray.rs       # System tray icon
+│   ├── tray.rs       # System tray icon with gesture feedback
 │   └── windows.rs    # Running app detection via Wayland protocol
 ├── docs/
 │   ├── README.md             # Documentation overview
@@ -195,47 +242,33 @@ cosmic-pie-menu/
 └── README.md
 ```
 
-## Why No Mouse Activation?
+## Cursor Position on Wayland
 
-Traditional pie menus (like [Kando](https://github.com/kando-menu/kando)) open at the cursor position when triggered by a mouse gesture or hotkey. This project currently opens the menu **centered on screen** instead. Here's why:
+Traditional pie menus (like [Kando](https://github.com/kando-menu/kando)) open at the cursor position when triggered. This is challenging on Wayland due to its security model.
 
 ### The Wayland Security Model
 
 Unlike X11, Wayland was designed with security in mind. One key restriction: **applications cannot query the global cursor position**. An app only knows where the cursor is when it's over that app's own window.
 
-This is intentional—it prevents malicious apps from tracking your mouse movements across the desktop, monitoring which windows you're using, or capturing input intended for other applications.
+This is intentional—it prevents malicious apps from tracking your mouse movements across the desktop.
 
-### What This Means for Pie Menus
+### How This Project Solves It
 
-When you press a keyboard shortcut to open the pie menu:
-1. The pie menu app starts with **no window yet**
-2. It cannot ask "where is the cursor right now?"
-3. It can only create a window and wait for cursor events *after* the window exists
-4. By then, the window is already positioned
+**Gesture-based activation** (recommended): The four-finger tap gesture workflow naturally solves this:
+1. Tap triggers gesture detection (via evdev, not Wayland)
+2. A transparent full-screen overlay appears
+3. Move mouse to desired position (overlay captures this)
+4. Release to show menu at captured position
 
-### How Other Apps Solve This
+**Keyboard shortcut with `--track`**: Uses a brief full-screen transparent overlay to capture cursor position before showing the menu.
 
-- **Kando** uses shell extensions (GNOME Shell, KDE KWin) that have privileged access to cursor position and expose it via D-Bus
-- **Some apps** use a brief full-screen transparent overlay to "catch" the cursor position, then reposition—this adds latency and visual artifacts
-- **COSMIC-native apps** could potentially use compositor-specific protocols, but these don't exist yet for this purpose
-
-### Current Approach
-
-This project uses **centered positioning**, which:
-- Works reliably without compositor extensions
-- Is predictable—you always know where the menu will appear
-- Works well with keyboard shortcuts (the recommended activation method)
-
-The `--track` mode attempts cursor tracking via a transparent overlay but falls back to centered after 500ms if it can't capture the position quickly enough.
-
-### Future Possibilities
-
-If COSMIC adds a protocol for trusted apps to query cursor position (similar to how it provides `ext_foreign_toplevel_list_v1` for window detection), this project could support cursor-positioned menus. Contributions implementing compositor-specific solutions are welcome.
+**Keyboard shortcut with `--pie`**: Opens menu centered on screen (predictable, no cursor tracking needed).
 
 ## Known Issues
 
 - **First Launch on Scaled Displays**: May briefly show incorrect size before correcting (within 500ms).
 - **Web App Detection**: Some PWAs/web apps may not be detected if their app_id doesn't match a desktop file pattern.
+- **Gesture Detection Requires input Group**: If gestures aren't working, ensure your user is in the `input` group and you've logged out/in.
 
 ## Contributing
 
@@ -263,7 +296,9 @@ From developing this project, several notable patterns emerged:
 
 - **Canvas over Widgets**: Standard row/column layouts couldn't achieve true circular positioning. Canvas-based rendering with trigonometry provided full control over radial geometry.
 
-- **Wayland Security Model**: Unlike X11, Wayland doesn't expose global cursor position to applications. This is a security feature, not a limitation to work around. The menu opens centered instead.
+- **Wayland Security Model**: Unlike X11, Wayland doesn't expose global cursor position to applications. Solved via transparent overlay that captures cursor on mouse movement.
+
+- **Gesture Detection via evdev**: Linux evdev subsystem provides raw touchpad events (BTN_TOOL_QUADTAP, ABS_MT_POSITION) independent of compositor handling. Distinguishing taps from swipes requires tracking both duration and finger movement.
 
 - **Running App Detection**: COSMIC supports `ext_foreign_toplevel_list_v1` Wayland protocol for detecting running applications. This required subprocess isolation to avoid Wayland connection conflicts with libcosmic.
 
@@ -295,5 +330,6 @@ This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) 
 - [System76](https://system76.com/) for the COSMIC desktop environment
 - [libcosmic](https://github.com/pop-os/libcosmic) for the UI framework
 - [iced](https://github.com/iced-rs/iced) for the underlying GUI library
+- [evdev](https://github.com/emberian/evdev) for Linux input device access
 - [Kando](https://github.com/kando-menu/kando) for pie menu inspiration
 - [Claude](https://claude.ai/) (Anthropic) for AI-assisted development collaboration

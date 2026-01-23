@@ -413,6 +413,118 @@ cosmic-pie-menu represents the most feature-complete integration with COSMIC, in
 
 ---
 
+## Theme 16: Bypassing Abstractions for Direct Access
+
+### Pattern
+
+When the compositor/Wayland couldn't provide cursor position, we bypassed it entirely:
+
+| Layer | What It Provides | Limitation |
+|-------|------------------|------------|
+| Wayland | Window management | No global cursor position |
+| libinput | Gesture recognition | Abstracts away raw events |
+| evdev | Raw kernel input | Direct access to touchpad |
+
+### Analysis
+
+The evdev layer sits below both Wayland and libinput. By reading `BTN_TOOL_QUADTAP` directly from `/dev/input/`, we detect gestures independent of what the compositor does with them.
+
+### Implication
+
+When higher-level abstractions don't provide needed functionality, look at lower layers. The trade-off is more manual implementation but fewer restrictions.
+
+---
+
+## Theme 17: Multi-Factor Gesture Discrimination
+
+### Pattern
+
+Distinguishing taps from swipes required multiple factors:
+
+| Factor | Tap | Swipe |
+|--------|-----|-------|
+| Duration | < 250ms | Usually longer |
+| Movement | < 500 units | Significant |
+
+Either factor alone was insufficient:
+- Quick swipes could complete in < 250ms
+- "Unclean" taps could have small movements
+
+### Analysis
+
+The combination of time AND movement thresholds provided reliable discrimination. Tuning these values required real-world testing with user feedback.
+
+### Implication
+
+Complex gesture recognition often requires multiple discriminating factors. Single-factor detection leads to false positives.
+
+---
+
+## Theme 18: Visual Feedback Across Components
+
+### Pattern
+
+The gesture workflow spans multiple components with visual feedback:
+
+```
+Touchpad → Gesture Thread → Tray Icon (cyan) → Tracker Overlay → Menu → Tray Icon (normal)
+    ↓              ↓              ↓                  ↓            ↓           ↓
+ evdev         mpsc channel   AtomicBool        layer-shell    canvas     reset()
+```
+
+### Analysis
+
+Shared state (`GestureFeedback` with `Arc<AtomicBool>`) coordinates visual feedback across threads. The tray icon color change provides immediate confirmation that the gesture was detected.
+
+### Implication
+
+Multi-stage interactions benefit from visual feedback at each stage. Users need confirmation that their input was received before the final result appears.
+
+---
+
+## Theme 19: Iterative Threshold Tuning
+
+### Pattern
+
+Gesture thresholds evolved through user feedback:
+
+| Version | Duration | Movement | Problem |
+|---------|----------|----------|---------|
+| v1 | 400ms | - | Swipes triggered menu |
+| v2 | 250ms | - | Still triggered on quick swipes |
+| v3 | 200ms | 100 (REL) | Wrong event type |
+| v4 | 200ms | 300 (ABS) | Too sensitive |
+| v5 | 250ms | 500 (ABS) | Working well |
+
+### Analysis
+
+Each threshold change addressed specific user-reported issues. The final values emerged from iterative testing, not theoretical calculation.
+
+### Implication
+
+Gesture recognition parameters require empirical tuning. Start conservative and adjust based on real usage patterns.
+
+---
+
+## Comparative Analysis Across Three Projects (Final)
+
+| Aspect | cosmic-bing-wallpaper | cosmic-runkat | cosmic-pie-menu |
+|--------|----------------------|---------------|-----------------|
+| Primary UI | Settings window | Tray icon only | Canvas overlay |
+| Complexity | Medium | Medium | High |
+| Platform Discovery | Config paths, D-Bus | Animation timing | Wayland protocols, evdev |
+| Iterations | ~5 major | ~4 major | ~15+ major |
+| Unique Challenge | Wallpaper setting API | CPU monitoring smoothing | Gesture detection, cursor tracking |
+| Wayland Depth | Surface | Minimal | Deep + bypassed for input |
+| Input Method | Click only | Click only | Click + gesture |
+| Theme Integration | Basic | Basic | Full (tray + menu + feedback) |
+
+### Trend
+
+cosmic-pie-menu pushed beyond Wayland entirely for input handling, demonstrating that sometimes the solution is to use a different subsystem (kernel evdev) rather than working within compositor limitations.
+
+---
+
 ## Conclusions
 
 1. **Visual feedback is essential** - UI development requires seeing results, not just reading code
@@ -438,3 +550,9 @@ cosmic-pie-menu represents the most feature-complete integration with COSMIC, in
 11. **Dynamic formulas over fixed ratios** - Layout calculations should adapt to context
 
 12. **Project patterns transfer** - Related projects serve as reference implementations for each other
+
+13. **Bypass abstractions when needed** - Lower-level access (evdev) can solve problems that higher layers (Wayland) cannot
+
+14. **Multi-factor discrimination** - Complex input recognition requires combining multiple signals
+
+15. **Iterative threshold tuning** - Gesture parameters emerge from testing, not calculation

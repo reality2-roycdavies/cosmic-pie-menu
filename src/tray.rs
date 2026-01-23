@@ -9,7 +9,9 @@ use ksni::{self, menu::StandardItem, Icon, MenuItem, Tray};
 use ksni::blocking::TrayMethods as BlockingTrayMethods;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Get the path to COSMIC's theme config file
@@ -51,12 +53,50 @@ enum TrayExitReason {
     ThemeChanged,
 }
 
+/// Shared state for gesture feedback
+#[derive(Clone)]
+pub struct GestureFeedback {
+    triggered: Arc<AtomicBool>,
+    reset_requested: Arc<AtomicBool>,
+}
+
+impl GestureFeedback {
+    pub fn new() -> Self {
+        Self {
+            triggered: Arc::new(AtomicBool::new(false)),
+            reset_requested: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Signal that a gesture was detected (turns icon cyan)
+    pub fn trigger(&self) {
+        self.triggered.store(true, Ordering::SeqCst);
+    }
+
+    /// Signal that the menu has closed (turns icon back to normal)
+    pub fn reset(&self) {
+        self.reset_requested.store(true, Ordering::SeqCst);
+    }
+
+    /// Check if triggered and clear the flag
+    fn check_and_reset_trigger(&self) -> bool {
+        self.triggered.swap(false, Ordering::SeqCst)
+    }
+
+    /// Check if reset was requested and clear the flag
+    fn check_and_reset_reset(&self) -> bool {
+        self.reset_requested.swap(false, Ordering::SeqCst)
+    }
+}
+
 /// The tray icon state
 struct PieMenuTray {
     /// Channel to send messages to the main app
     tx: Sender<TrayMessage>,
     /// Whether system is in dark mode
     dark_mode: bool,
+    /// Whether gesture was just triggered (for visual feedback)
+    gesture_triggered: bool,
 }
 
 impl Tray for PieMenuTray {
@@ -69,8 +109,8 @@ impl Tray for PieMenuTray {
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
-        // Create a styled icon that adapts to theme
-        create_pie_icon(self.dark_mode)
+        // Create a styled icon that adapts to theme and gesture state
+        create_pie_icon(self.dark_mode, self.gesture_triggered)
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
@@ -124,8 +164,8 @@ impl Tray for PieMenuTray {
 }
 
 /// Create a styled icon with dots in a circle + center dot (32x32 ARGB)
-/// Adapts to light/dark theme
-fn create_pie_icon(dark_mode: bool) -> Vec<Icon> {
+/// Adapts to light/dark theme and shows highlight when gesture triggered
+fn create_pie_icon(dark_mode: bool, triggered: bool) -> Vec<Icon> {
     let size = 32i32;
     let mut pixels = vec![0u8; (size * size * 4) as usize];
 
@@ -136,7 +176,10 @@ fn create_pie_icon(dark_mode: bool) -> Vec<Icon> {
     let num_dots = 8;
 
     // Theme-aware colors (light icon on dark bg, dark icon on light bg)
-    let (r, g, b) = if dark_mode {
+    // When triggered, use a bright accent color (cyan/teal)
+    let (r, g, b) = if triggered {
+        (0u8, 200u8, 220u8) // Bright cyan for triggered state
+    } else if dark_mode {
         (220u8, 220u8, 230u8) // Light gray-blue for dark mode
     } else {
         (60u8, 60u8, 70u8) // Dark gray for light mode
@@ -207,12 +250,13 @@ fn create_pie_icon(dark_mode: bool) -> Vec<Icon> {
 }
 
 /// Inner tray run loop - returns reason for exit
-fn run_tray_inner(tx: Sender<TrayMessage>) -> Result<TrayExitReason, String> {
+fn run_tray_inner(tx: Sender<TrayMessage>, feedback: GestureFeedback) -> Result<TrayExitReason, String> {
     let current_dark_mode = is_dark_mode();
 
     let tray = PieMenuTray {
         tx: tx.clone(),
         dark_mode: current_dark_mode,
+        gesture_triggered: false,
     };
 
     // Spawn the tray - not sandboxed (native app)
@@ -223,7 +267,8 @@ fn run_tray_inner(tx: Sender<TrayMessage>) -> Result<TrayExitReason, String> {
     // Main event loop
     let mut last_loop_time = Instant::now();
     let mut last_theme_check = Instant::now();
-    let mut tracked_dark_mode = current_dark_mode;
+    let tracked_dark_mode = current_dark_mode;
+    let mut icon_highlighted = false;
 
     loop {
         let loop_start = Instant::now();
@@ -237,6 +282,23 @@ fn run_tray_inner(tx: Sender<TrayMessage>) -> Result<TrayExitReason, String> {
         }
         last_loop_time = loop_start;
 
+        // Check for gesture trigger - highlight the icon
+        if feedback.check_and_reset_trigger() && !icon_highlighted {
+            icon_highlighted = true;
+            // Update tray with highlighted icon
+            handle.update(|tray| {
+                tray.gesture_triggered = true;
+            });
+        }
+
+        // Check for reset request - unhighlight the icon when menu closes
+        if feedback.check_and_reset_reset() && icon_highlighted {
+            icon_highlighted = false;
+            handle.update(|tray| {
+                tray.gesture_triggered = false;
+            });
+        }
+
         // Check for theme changes every second
         if loop_start.duration_since(last_theme_check) > Duration::from_secs(1) {
             last_theme_check = loop_start;
@@ -249,39 +311,47 @@ fn run_tray_inner(tx: Sender<TrayMessage>) -> Result<TrayExitReason, String> {
         }
 
         // Sleep briefly
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(50)); // Faster polling for responsive feedback
     }
 }
 
-/// Run the tray icon service
-/// Returns a receiver for tray messages
-pub fn run_tray() -> Result<Receiver<TrayMessage>, String> {
-    let (tx, rx) = mpsc::channel();
+/// Run the tray icon service with an externally provided sender
+/// This allows sharing the channel with other components (like gesture detection)
+pub fn run_tray_with_sender(tx: Sender<TrayMessage>, feedback: GestureFeedback) {
+    // Small delay to let the panel initialize
+    std::thread::sleep(Duration::from_secs(2));
 
-    std::thread::spawn(move || {
-        // Small delay to let the panel initialize
-        std::thread::sleep(Duration::from_secs(2));
-
-        // Retry loop for suspend/resume and theme changes
-        loop {
-            match run_tray_inner(tx.clone()) {
-                Ok(TrayExitReason::Quit) => break,
-                Ok(TrayExitReason::SuspendResume) => {
-                    println!("Detected suspend/resume, restarting tray...");
-                    std::thread::sleep(Duration::from_millis(500));
-                    continue;
-                }
-                Ok(TrayExitReason::ThemeChanged) => {
-                    // Short delay then restart with new theme
-                    std::thread::sleep(Duration::from_millis(100));
-                    continue;
-                }
-                Err(e) => {
-                    eprintln!("Tray error: {}", e);
-                    break;
-                }
+    // Retry loop for suspend/resume and theme changes
+    loop {
+        match run_tray_inner(tx.clone(), feedback.clone()) {
+            Ok(TrayExitReason::Quit) => break,
+            Ok(TrayExitReason::SuspendResume) => {
+                println!("Detected suspend/resume, restarting tray...");
+                std::thread::sleep(Duration::from_millis(500));
+                continue;
+            }
+            Ok(TrayExitReason::ThemeChanged) => {
+                // Short delay then restart with new theme
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            Err(e) => {
+                eprintln!("Tray error: {}", e);
+                break;
             }
         }
+    }
+}
+
+/// Run the tray icon service (without gesture feedback)
+/// Returns a receiver for tray messages
+#[allow(dead_code)]
+pub fn run_tray() -> Result<Receiver<TrayMessage>, String> {
+    let (tx, rx) = mpsc::channel();
+    let feedback = GestureFeedback::new();
+
+    std::thread::spawn(move || {
+        run_tray_with_sender(tx, feedback);
     });
 
     Ok(rx)
