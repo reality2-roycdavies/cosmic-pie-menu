@@ -525,6 +525,193 @@ cosmic-pie-menu pushed beyond Wayland entirely for input handling, demonstrating
 
 ---
 
+## Theme 20: Settings Window with COSMIC Application Framework
+
+### Pattern
+
+Adding a settings window required using the proper COSMIC application framework rather than basic iced:
+
+| Approach | Result |
+|----------|--------|
+| `cosmic::iced::application` | Window floats above tiling, wrong styling |
+| `cosmic::Application` trait | Proper COSMIC styling, tiles correctly |
+
+### Implementation
+
+```rust
+impl Application for SettingsApp {
+    type Executor = cosmic::executor::Default;
+    type Flags = ();
+    type Message = Message;
+
+    const APP_ID: &'static str = "io.github.reality2_roycdavies.cosmic-pie-menu.settings";
+
+    fn view(&self) -> Element<'_, Self::Message> {
+        settings::section()
+            .title("Gesture Detection")
+            .add(settings::item("Finger Count", dropdown(...)))
+            .add(settings::flex_item("Tap Duration", slider(...)))
+    }
+}
+```
+
+### Analysis
+
+COSMIC provides specialized widgets (`settings::section`, `settings::item`, `settings::flex_item`) that produce consistent styling with COSMIC Settings panels. Using basic iced widgets produces functional but visually inconsistent UIs.
+
+### Implication
+
+When building settings UIs for COSMIC, use the `cosmic::Application` trait and `cosmic::widget::settings` module for visual consistency with the system.
+
+---
+
+## Theme 21: Hot-Reload Configuration via File Polling
+
+### Pattern
+
+Settings changes should apply immediately without restarting the daemon:
+
+| Approach | Complexity | User Experience |
+|----------|------------|-----------------|
+| Restart required | Simple | Poor - requires manual restart |
+| IPC between processes | Complex | Good - immediate |
+| File polling | Medium | Good - 2 second delay acceptable |
+
+### Solution
+
+The gesture thread periodically reads the config file:
+
+```rust
+let config_check_interval = Duration::from_secs(2);
+
+loop {
+    if last_config_check.elapsed() > config_check_interval {
+        let new_cfg = GestureConfig::from(&PieMenuConfig::load());
+        if new_cfg != current_cfg {
+            println!("Config changed, applying...");
+            current_cfg = new_cfg;
+        }
+        last_config_check = Instant::now();
+    }
+    // ... process events with current_cfg
+}
+```
+
+### Analysis
+
+File polling is simpler than IPC and acceptable when sub-second response isn't required. The 2-second check interval is imperceptible for configuration changes.
+
+### Implication
+
+For cross-process configuration sharing, file-based polling is often simpler than IPC when immediate response isn't critical.
+
+---
+
+## Theme 22: Subprocess Spawning for GUI Windows
+
+### Pattern
+
+GUI windows (settings, pie menu) must run on the main thread due to Wayland/winit requirements:
+
+```
+Error: Initializing the event loop outside of the main thread is a significant
+cross-platform compatibility hazard.
+```
+
+### Solution
+
+Spawn GUI components as separate processes:
+
+```rust
+// In tray message handler
+Ok(TrayMessage::OpenSettings) => {
+    let exe = std::env::current_exe()?;
+    Command::new(exe).arg("--settings").spawn()?;
+}
+
+// In main()
+if args.contains(&"--settings".to_string()) {
+    settings::run_settings();
+    return;
+}
+```
+
+### Analysis
+
+This pattern is already used for the pie menu (`--track`, `--pie-at`). Extending it to settings maintains consistency and avoids threading issues.
+
+### Implication
+
+For applications with multiple GUI components (tray + windows), subprocess spawning is cleaner than trying to manage multiple event loops or thread safety.
+
+---
+
+## Theme 23: Debouncing Multi-Finger Transitions
+
+### Pattern
+
+In 3-finger mode, placing 4 fingers briefly triggers 3-finger detection:
+
+```
+Finger sequence: 1 → 2 → 3 (BTN_TOOL_TRIPLETAP=1) → 4 (TRIPLETAP=0, QUADTAP=1)
+```
+
+The 3→4 transition causes a false trigger because BTN_TOOL_TRIPLETAP goes up.
+
+### Solution
+
+Add a debounce period and watch for the cancellation key:
+
+```rust
+const PENDING_TRIGGER_DEBOUNCE: Duration = Duration::from_millis(150);
+
+enum GestureState {
+    PendingTrigger { pending_since: Instant },
+    // ...
+}
+
+// When TRIPLETAP goes up in 3-finger mode:
+*state = GestureState::PendingTrigger { pending_since: Instant::now() };
+
+// If QUADTAP goes active during pending:
+*state = GestureState::Idle;  // Cancel the trigger
+return GestureEvent::TriggerCancelled;
+
+// After 150ms without QUADTAP:
+// Confirm the trigger
+```
+
+### Analysis
+
+150ms is long enough to detect 3→4 transitions but short enough to feel responsive. The debounce only applies to 3-finger mode where this ambiguity exists.
+
+### Implication
+
+Multi-finger gesture detection requires handling transition states between finger counts. Debouncing with cancellation provides reliable discrimination.
+
+---
+
+## Comparative Analysis Across Three Projects (Final)
+
+| Aspect | cosmic-bing-wallpaper | cosmic-runkat | cosmic-pie-menu |
+|--------|----------------------|---------------|-----------------|
+| Primary UI | Settings window | Tray icon only | Canvas overlay + Settings |
+| Complexity | Medium | Medium | High |
+| Platform Discovery | Config paths, D-Bus | Animation timing | Wayland protocols, evdev |
+| Iterations | ~5 major | ~4 major | ~18+ major |
+| Unique Challenge | Wallpaper setting API | CPU monitoring smoothing | Gesture detection, cursor tracking |
+| Wayland Depth | Surface | Minimal | Deep + bypassed for input |
+| Input Method | Click only | Click only | Click + gesture |
+| Theme Integration | Basic | Basic | Full (tray + menu + feedback) |
+| Settings Window | Yes (COSMIC style) | Yes (COSMIC style) | Yes (COSMIC style) |
+| Hot-Reload Config | No | No | Yes (2s polling) |
+
+### Trend
+
+cosmic-pie-menu is the most complex project, combining all patterns from previous projects plus new ones for gesture detection and hot-reload configuration.
+
+---
+
 ## Conclusions
 
 1. **Visual feedback is essential** - UI development requires seeing results, not just reading code
@@ -556,3 +743,11 @@ cosmic-pie-menu pushed beyond Wayland entirely for input handling, demonstrating
 14. **Multi-factor discrimination** - Complex input recognition requires combining multiple signals
 
 15. **Iterative threshold tuning** - Gesture parameters emerge from testing, not calculation
+
+16. **Use COSMIC Application framework** - For proper styling and tiling integration, use `cosmic::Application` not raw iced
+
+17. **File polling for hot-reload** - Simple and effective for cross-process configuration sharing
+
+18. **Subprocess spawning for GUIs** - Avoids main-thread event loop requirements
+
+19. **Debounce multi-finger transitions** - Handle ambiguous finger count transitions with timed cancellation

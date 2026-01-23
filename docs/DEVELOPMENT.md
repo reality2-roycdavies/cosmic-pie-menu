@@ -21,7 +21,9 @@ This document captures learnings and solutions discovered while developing cosmi
 15. [Automatic Autostart](#automatic-autostart)
 16. [Icon Theme Search Order](#icon-theme-search-order)
 17. [Touchpad Gesture Detection](#touchpad-gesture-detection)
-18. [Resources](#resources)
+18. [Settings Window with COSMIC Framework](#settings-window-with-cosmic-framework)
+19. [Gesture Debouncing for 3-Finger Mode](#gesture-debouncing-for-3-finger-mode)
+20. [Resources](#resources)
 
 ---
 
@@ -776,6 +778,156 @@ newgrp input  # Apply immediately without logout
 
 ---
 
+## Settings Window with COSMIC Framework
+
+### The Challenge
+
+Add a settings window that:
+- Matches COSMIC's visual style
+- Participates in window tiling (not floating)
+- Allows runtime configuration of gesture parameters
+- Applies changes without restarting the daemon
+
+### Solution: cosmic::Application Trait
+
+Using raw `cosmic::iced::application` creates a window that floats above tiling and has wrong styling. The proper approach uses `cosmic::Application`:
+
+```rust
+use cosmic::app::Core;
+use cosmic::widget::{settings, text, dropdown};
+use cosmic::{Application, Element, Task};
+
+impl Application for SettingsApp {
+    type Executor = cosmic::executor::Default;
+    type Flags = ();
+    type Message = Message;
+
+    const APP_ID: &'static str = "io.github.reality2_roycdavies.cosmic-pie-menu.settings";
+
+    fn core(&self) -> &Core { &self.core }
+    fn core_mut(&mut self) -> &mut Core { &mut self.core }
+
+    fn header_center(&self) -> Vec<Element<'_, Self::Message>> {
+        vec![text::heading("Pie Menu Settings").into()]
+    }
+
+    fn view(&self) -> Element<'_, Self::Message> {
+        let gesture_section = settings::section()
+            .title("Gesture Detection")
+            .add(settings::item(
+                "Finger Count",
+                dropdown(FINGER_OPTIONS, Some(self.finger_index), Message::FingerCountChanged),
+            ))
+            .add(settings::flex_item(
+                "Tap Duration",
+                widget::row()
+                    .push(text::body(format!("{}ms", self.config.tap_duration_ms)))
+                    .push(widget::slider(100.0..=500.0, value, Message::TapDurationChanged)),
+            ));
+
+        settings::view_column(vec![
+            text::title1("Gesture Settings").into(),
+            gesture_section.into(),
+        ])
+    }
+}
+
+pub fn run_settings() {
+    let settings = cosmic::app::Settings::default()
+        .size(cosmic::iced::Size::new(500.0, 420.0));
+    cosmic::app::run::<SettingsApp>(settings, ())
+}
+```
+
+### Subprocess Spawning
+
+GUI windows must run on the main thread. The daemon spawns settings as a subprocess:
+
+```rust
+// Tray menu handler
+Ok(TrayMessage::OpenSettings) => {
+    let exe = std::env::current_exe()?;
+    Command::new(exe).arg("--settings").spawn()?;
+}
+
+// Main entry point
+if args.contains(&"--settings".to_string()) {
+    settings::run_settings();
+    return;
+}
+```
+
+### Hot-Reload via File Polling
+
+Settings save to `~/.config/cosmic-pie-menu/config.json`. The gesture thread polls for changes:
+
+```rust
+let config_check_interval = Duration::from_secs(2);
+
+loop {
+    if last_config_check.elapsed() > config_check_interval {
+        let new_cfg = GestureConfig::from(&PieMenuConfig::load());
+        if new_cfg.finger_count != current_cfg.finger_count
+            || new_cfg.tap_max_duration != current_cfg.tap_max_duration
+        {
+            println!("Config changed, applying...");
+            current_cfg = new_cfg;
+        }
+        last_config_check = Instant::now();
+    }
+    // Process events using current_cfg values
+}
+```
+
+### Key Insights
+
+- **COSMIC widgets for styling**: `settings::section()`, `settings::item()`, `settings::flex_item()` produce consistent COSMIC styling
+- **Subprocess for GUI**: Avoids Wayland/winit main-thread requirements
+- **File polling for IPC**: Simpler than true IPC, acceptable 2-second latency for config changes
+- **Auto-save on change**: Each slider/dropdown change saves immediately
+
+---
+
+## Gesture Debouncing for 3-Finger Mode
+
+### The Challenge
+
+In 3-finger mode, placing 4 fingers briefly triggers 3-finger detection because fingers land sequentially (1→2→3→4), causing BTN_TOOL_TRIPLETAP to pulse.
+
+### Solution: Debounce with Cancellation
+
+```rust
+const PENDING_TRIGGER_DEBOUNCE: Duration = Duration::from_millis(150);
+
+enum GestureState {
+    Idle,
+    FingersDown { ... },
+    PendingTrigger { pending_since: Instant },
+}
+
+// In 3-finger mode, when BTN_TOOL_TRIPLETAP goes up with valid tap:
+*state = GestureState::PendingTrigger { pending_since: Instant::now() };
+// Don't trigger yet - wait for debounce
+
+// If BTN_TOOL_QUADTAP goes active during pending:
+*state = GestureState::Idle;
+return GestureEvent::TriggerCancelled;  // 3→4 transition detected
+
+// After 150ms without QUADTAP:
+if check_pending_trigger(&mut state) {
+    // Confirmed 3-finger tap
+    trigger_menu();
+}
+```
+
+### Key Insights
+
+- 150ms debounce catches most 3→4 finger transitions
+- Only applies to 3-finger mode (4-finger mode triggers immediately)
+- Visual feedback (tray icon) resets on cancellation
+
+---
+
 ## Resources
 
 ### Crates Used
@@ -785,6 +937,7 @@ newgrp input  # Apply immediately without logout
 - [`freedesktop-icons`](https://crates.io/crates/freedesktop-icons) - Icon theme lookup
 - [`ron`](https://crates.io/crates/ron) - Rusty Object Notation for COSMIC configs
 - [`evdev`](https://crates.io/crates/evdev) - Linux input device (evdev) access for gesture detection
+- [`serde_json`](https://crates.io/crates/serde_json) - JSON serialization for settings
 
 ### Documentation
 
