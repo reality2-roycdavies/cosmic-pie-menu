@@ -237,6 +237,57 @@ fn is_id_in_set(id: &str, seen: &HashSet<String>) -> bool {
     seen.iter().any(|s| s.to_lowercase() == id_lower)
 }
 
+/// Dock applet definition
+struct DockApplet {
+    id: &'static str,
+    name: &'static str,
+    exec: &'static str,
+    icon: &'static str,
+}
+
+/// Known dock applets that can be included in the pie menu
+const DOCK_APPLETS: &[DockApplet] = &[
+    DockApplet {
+        id: "com.system76.CosmicPanelAppButton",
+        name: "App Library",
+        exec: "cosmic-app-library",
+        icon: "com.system76.CosmicPanelAppButton",
+    },
+    DockApplet {
+        id: "com.system76.CosmicPanelLauncherButton",
+        name: "Launcher",
+        exec: "cosmic-launcher",
+        icon: "com.system76.CosmicPanelLauncherButton",
+    },
+    DockApplet {
+        id: "com.system76.CosmicPanelWorkspacesButton",
+        name: "Workspaces",
+        exec: "cosmic-workspaces",
+        icon: "com.system76.CosmicPanelWorkspacesButton",
+    },
+];
+
+/// Create AppInfo entries for enabled dock applets
+pub fn load_dock_applets(enabled_applets: &[String]) -> Vec<AppInfo> {
+    let mut apps = Vec::new();
+
+    for applet in DOCK_APPLETS {
+        if enabled_applets.iter().any(|a| a == applet.id) {
+            apps.push(AppInfo {
+                id: applet.id.to_string(),
+                name: applet.name.to_string(),
+                icon: Some(applet.icon.to_string()),
+                exec: Some(applet.exec.to_string()),
+                desktop_path: PathBuf::new(), // No desktop file for applets
+                is_running: false,
+                is_favorite: true, // Treat as favorites since they're in the dock
+            });
+        }
+    }
+
+    apps
+}
+
 /// Find icon path for an icon name
 /// Returns the path to the icon file, preferring SVG, then PNG
 pub fn find_icon_path(icon_name: &str, size: u16) -> Option<PathBuf> {
@@ -255,6 +306,48 @@ pub fn find_icon_path(icon_name: &str, size: u16) -> Option<PathBuf> {
         .find()
     {
         return Some(path);
+    }
+
+    // Try direct paths in common icon themes (including Pop which has good COSMIC icons)
+    let icon_themes = ["Pop", "Adwaita", "hicolor", "Papirus"];
+    let categories = ["apps", "actions", "places", "status"];
+    let sizes = [&format!("{}x{}", size, size), "scalable", "symbolic"];
+
+    for theme in icon_themes {
+        for sz in sizes {
+            for category in categories {
+                // Try with .svg extension
+                let path = PathBuf::from(format!(
+                    "/usr/share/icons/{}/{}/{}/{}.svg",
+                    theme, sz, category, icon_name
+                ));
+                if path.exists() {
+                    return Some(path);
+                }
+                // Try with .png extension
+                let path = PathBuf::from(format!(
+                    "/usr/share/icons/{}/{}/{}/{}.png",
+                    theme, sz, category, icon_name
+                ));
+                if path.exists() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+
+    // For symbolic icons, try additional lookups
+    if icon_name.ends_with("-symbolic") {
+        // Try smaller sizes that symbolic icons typically come in
+        for sym_size in [24, 16, 32, 48] {
+            if let Some(path) = freedesktop_icons::lookup(icon_name)
+                .with_size(sym_size)
+                .with_scale(1)
+                .find()
+            {
+                return Some(path);
+            }
+        }
     }
 
     // Try common alternate names
@@ -311,5 +404,34 @@ mod tests {
         // Test Flatpak app (Betterbird)
         let result4 = find_icon_path("eu.betterbird.Betterbird", 48);
         println!("Betterbird icon: {:?}", result4);
+    }
+
+    #[test]
+    fn test_find_symbolic_icon() {
+        // Test symbolic icons used by dock applets
+        let result1 = find_icon_path("view-app-grid-symbolic", 48);
+        println!("view-app-grid-symbolic: {:?}", result1);
+        assert!(result1.is_some(), "Should find view-app-grid-symbolic");
+
+        let result2 = find_icon_path("system-search-symbolic", 48);
+        println!("system-search-symbolic: {:?}", result2);
+        assert!(result2.is_some(), "Should find system-search-symbolic");
+
+        let result3 = find_icon_path("view-paged-symbolic", 48);
+        println!("view-paged-symbolic: {:?}", result3);
+        assert!(result3.is_some(), "Should find view-paged-symbolic");
+    }
+
+    #[test]
+    fn test_applet_icons() {
+        // Test the actual icons we use for dock applets
+        let result1 = find_icon_path("appgrid", 48);
+        println!("appgrid: {:?}", result1);
+
+        let result2 = find_icon_path("edit-find-symbolic", 48);
+        println!("edit-find-symbolic: {:?}", result2);
+
+        let result3 = find_icon_path("focus-windows-symbolic", 48);
+        println!("focus-windows-symbolic: {:?}", result3);
     }
 }

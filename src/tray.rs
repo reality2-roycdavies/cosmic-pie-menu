@@ -7,8 +7,28 @@
 
 use ksni::{self, menu::StandardItem, Icon, MenuItem, Tray};
 use ksni::blocking::TrayMethods as BlockingTrayMethods;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
+
+/// Get the path to COSMIC's theme config file
+fn cosmic_theme_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"))
+}
+
+/// Detect if the system is in dark mode
+fn is_dark_mode() -> bool {
+    if let Some(path) = cosmic_theme_path() {
+        if let Ok(content) = fs::read_to_string(&path) {
+            let trimmed = content.trim();
+            // COSMIC stores "true" or "false"
+            return trimmed == "true";
+        }
+    }
+    // Default to dark mode
+    true
+}
 
 /// Messages that can be sent from the tray to the main application
 #[derive(Debug, Clone)]
@@ -23,17 +43,20 @@ pub enum TrayMessage {
     Quit,
 }
 
-/// Reason for tray exit - used for suspend/resume detection
+/// Reason for tray exit - used for suspend/resume and theme change detection
 #[derive(Debug)]
 enum TrayExitReason {
     Quit,
     SuspendResume,
+    ThemeChanged,
 }
 
 /// The tray icon state
 struct PieMenuTray {
     /// Channel to send messages to the main app
     tx: Sender<TrayMessage>,
+    /// Whether system is in dark mode
+    dark_mode: bool,
 }
 
 impl Tray for PieMenuTray {
@@ -46,8 +69,8 @@ impl Tray for PieMenuTray {
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
-        // Create a simple pie-chart style icon
-        create_pie_icon()
+        // Create a styled icon that adapts to theme
+        create_pie_icon(self.dark_mode)
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
@@ -100,48 +123,78 @@ impl Tray for PieMenuTray {
     }
 }
 
-/// Create a simple pie-chart icon (32x32 ARGB)
-fn create_pie_icon() -> Vec<Icon> {
+/// Create a styled icon with dots in a circle + center dot (32x32 ARGB)
+/// Adapts to light/dark theme
+fn create_pie_icon(dark_mode: bool) -> Vec<Icon> {
     let size = 32i32;
     let mut pixels = vec![0u8; (size * size * 4) as usize];
 
     let center = size as f32 / 2.0;
-    let radius = center - 2.0;
+    let outer_radius = center - 3.0;
+    let dot_radius = 2.5;
+    let center_dot_radius = 4.0;
+    let num_dots = 8;
 
-    // Colors for pie segments (ARGB format for ksni)
-    let colors: [(u8, u8, u8); 6] = [
-        (255, 100, 100), // Red
-        (100, 255, 100), // Green
-        (100, 100, 255), // Blue
-        (255, 255, 100), // Yellow
-        (255, 100, 255), // Magenta
-        (100, 255, 255), // Cyan
-    ];
+    // Theme-aware colors (light icon on dark bg, dark icon on light bg)
+    let (r, g, b) = if dark_mode {
+        (220u8, 220u8, 230u8) // Light gray-blue for dark mode
+    } else {
+        (60u8, 60u8, 70u8) // Dark gray for light mode
+    };
 
+    // Draw outer dots in a circle
+    for i in 0..num_dots {
+        let angle = (i as f32 / num_dots as f32) * 2.0 * std::f32::consts::PI - std::f32::consts::FRAC_PI_2;
+        let dot_x = center + outer_radius * angle.cos();
+        let dot_y = center + outer_radius * angle.sin();
+
+        // Fill pixels within dot radius
+        for y in 0..size {
+            for x in 0..size {
+                let dx = x as f32 - dot_x;
+                let dy = y as f32 - dot_y;
+                let dist = (dx * dx + dy * dy).sqrt();
+
+                if dist <= dot_radius {
+                    let idx = ((y * size + x) * 4) as usize;
+                    // Anti-aliasing at edges
+                    let alpha = if dist > dot_radius - 1.0 {
+                        ((dot_radius - dist) * 255.0) as u8
+                    } else {
+                        255
+                    };
+                    // Blend if there's already a pixel
+                    if pixels[idx] < alpha {
+                        pixels[idx] = alpha;
+                        pixels[idx + 1] = r;
+                        pixels[idx + 2] = g;
+                        pixels[idx + 3] = b;
+                    }
+                }
+            }
+        }
+    }
+
+    // Draw center dot
     for y in 0..size {
         for x in 0..size {
             let dx = x as f32 - center;
             let dy = y as f32 - center;
             let dist = (dx * dx + dy * dy).sqrt();
 
-            let idx = ((y * size + x) * 4) as usize;
-
-            if dist <= radius && dist > radius * 0.3 {
-                // Calculate angle and determine segment
-                let angle = dy.atan2(dx) + std::f32::consts::PI;
-                let segment = ((angle / (2.0 * std::f32::consts::PI)) * 6.0) as usize;
-                let (r, g, b) = colors[segment % 6];
-
-                pixels[idx] = 255;     // A
-                pixels[idx + 1] = r;   // R
-                pixels[idx + 2] = g;   // G
-                pixels[idx + 3] = b;   // B
-            } else if dist <= radius * 0.3 {
-                // Center dot
-                pixels[idx] = 255;     // A
-                pixels[idx + 1] = 200; // R
-                pixels[idx + 2] = 200; // G
-                pixels[idx + 3] = 200; // B
+            if dist <= center_dot_radius {
+                let idx = ((y * size + x) * 4) as usize;
+                let alpha = if dist > center_dot_radius - 1.0 {
+                    ((center_dot_radius - dist) * 255.0) as u8
+                } else {
+                    255
+                };
+                if pixels[idx] < alpha {
+                    pixels[idx] = alpha;
+                    pixels[idx + 1] = r;
+                    pixels[idx + 2] = g;
+                    pixels[idx + 3] = b;
+                }
             }
         }
     }
@@ -155,7 +208,12 @@ fn create_pie_icon() -> Vec<Icon> {
 
 /// Inner tray run loop - returns reason for exit
 fn run_tray_inner(tx: Sender<TrayMessage>) -> Result<TrayExitReason, String> {
-    let tray = PieMenuTray { tx: tx.clone() };
+    let current_dark_mode = is_dark_mode();
+
+    let tray = PieMenuTray {
+        tx: tx.clone(),
+        dark_mode: current_dark_mode,
+    };
 
     // Spawn the tray - not sandboxed (native app)
     let handle = BlockingTrayMethods::disable_dbus_name(tray, false)
@@ -164,6 +222,8 @@ fn run_tray_inner(tx: Sender<TrayMessage>) -> Result<TrayExitReason, String> {
 
     // Main event loop
     let mut last_loop_time = Instant::now();
+    let mut last_theme_check = Instant::now();
+    let mut tracked_dark_mode = current_dark_mode;
 
     loop {
         let loop_start = Instant::now();
@@ -176,6 +236,17 @@ fn run_tray_inner(tx: Sender<TrayMessage>) -> Result<TrayExitReason, String> {
             return Ok(TrayExitReason::SuspendResume);
         }
         last_loop_time = loop_start;
+
+        // Check for theme changes every second
+        if loop_start.duration_since(last_theme_check) > Duration::from_secs(1) {
+            last_theme_check = loop_start;
+            let new_dark_mode = is_dark_mode();
+            if new_dark_mode != tracked_dark_mode {
+                println!("Theme changed (dark_mode: {} -> {}), restarting tray...", tracked_dark_mode, new_dark_mode);
+                handle.shutdown();
+                return Ok(TrayExitReason::ThemeChanged);
+            }
+        }
 
         // Sleep briefly
         std::thread::sleep(Duration::from_millis(100));
@@ -191,13 +262,18 @@ pub fn run_tray() -> Result<Receiver<TrayMessage>, String> {
         // Small delay to let the panel initialize
         std::thread::sleep(Duration::from_secs(2));
 
-        // Retry loop for suspend/resume
+        // Retry loop for suspend/resume and theme changes
         loop {
             match run_tray_inner(tx.clone()) {
                 Ok(TrayExitReason::Quit) => break,
                 Ok(TrayExitReason::SuspendResume) => {
                     println!("Detected suspend/resume, restarting tray...");
                     std::thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
+                Ok(TrayExitReason::ThemeChanged) => {
+                    // Short delay then restart with new theme
+                    std::thread::sleep(Duration::from_millis(100));
                     continue;
                 }
                 Err(e) => {

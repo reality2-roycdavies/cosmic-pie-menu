@@ -55,6 +55,29 @@ fn calculate_menu_radius(num_apps: usize) -> f32 {
     calculated.max(MIN_MENU_RADIUS)
 }
 
+/// Calculate the radius at which icons should be placed
+/// Uses a formula that keeps icons visually centered in their segment
+/// regardless of pie size, with slight outward bias for larger pies
+fn calculate_icon_radius(menu_radius: f32, num_apps: usize) -> f32 {
+    // The segment spans from INNER_RADIUS to menu_radius
+    let segment_depth = menu_radius - INNER_RADIUS;
+
+    // Base position: center of segment
+    let center = INNER_RADIUS + segment_depth / 2.0;
+
+    // Add outward bias that increases slightly with more apps
+    // (narrower segments benefit from icons closer to edge)
+    let bias = if num_apps <= 6 {
+        0.1  // Small pie: slight outward bias
+    } else if num_apps <= 10 {
+        0.15 // Medium pie: moderate outward bias
+    } else {
+        0.2  // Large pie: more outward bias
+    };
+
+    center + segment_depth * bias
+}
+
 /// Theme colors for the pie menu
 /// TODO: Integrate with COSMIC theme system for light/dark mode
 struct PieTheme {
@@ -253,8 +276,8 @@ impl PieMenuApp {
                 let start_angle = angle - slice_angle / 2.0;
                 let end_angle = angle + slice_angle / 2.0;
 
-                // Calculate icon position on the circle (at 3/4 mark, closer to outer edge)
-                let icon_radius = INNER_RADIUS + (menu_radius - INNER_RADIUS) * 0.65;
+                // Calculate icon position using dynamic formula
+                let icon_radius = calculate_icon_radius(menu_radius, num_apps);
                 let icon_pos = Point::new(
                     center.x + icon_radius * angle.cos(),
                     center.y + icon_radius * angle.sin(),
@@ -650,8 +673,8 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                         .with_width(1.0),
                 );
 
-                // Calculate icon position (at 3/4 mark, closer to outer edge)
-                let icon_radius = INNER_RADIUS + (self.menu_radius - INNER_RADIUS) * 0.65;
+                // Calculate icon position using dynamic formula
+                let icon_radius = calculate_icon_radius(self.menu_radius, self.slices.len());
                 let icon_center = Point::new(
                     center.x + icon_radius * slice.angle.cos(),
                     center.y + icon_radius * slice.angle.sin(),
