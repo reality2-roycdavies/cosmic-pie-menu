@@ -90,7 +90,7 @@ fn calculate_icon_radius(menu_radius: f32, inner_radius: f32, num_apps: usize) -
 }
 
 /// Theme colors for the pie menu
-/// TODO: Integrate with COSMIC theme system for light/dark mode
+/// Integrates with COSMIC theme system for consistent colors
 struct PieTheme {
     /// Background color of the pie
     bg_color: Color,
@@ -108,48 +108,63 @@ struct PieTheme {
     icon_bg_hover_color: Color,
     /// Text color
     text_color: Color,
-    /// Subtle text color (for close button, etc.)
-    text_subtle_color: Color,
+    /// Running indicator color
+    running_indicator_color: Color,
+}
+
+/// Convert a COSMIC Srgba color to iced Color with custom alpha
+fn srgba_to_color(srgba: cosmic::theme::CosmicColor, alpha: f32) -> Color {
+    Color::from_rgba(srgba.red, srgba.green, srgba.blue, alpha)
+}
+
+/// Convert a COSMIC Srgba color to iced Color preserving alpha
+fn srgba_to_color_full(srgba: cosmic::theme::CosmicColor) -> Color {
+    Color::from_rgba(srgba.red, srgba.green, srgba.blue, srgba.alpha)
 }
 
 impl PieTheme {
-    /// Dark theme (default)
-    fn dark() -> Self {
-        Self {
-            bg_color: Color::from_rgba(0.10, 0.10, 0.12, 0.95),
-            segment_color: Color::from_rgba(0.14, 0.14, 0.16, 0.95),
-            segment_hover_color: Color::from_rgba(0.22, 0.22, 0.26, 0.95),
-            center_color: Color::from_rgba(0.12, 0.12, 0.14, 0.98),
-            border_color: Color::from_rgba(0.25, 0.25, 0.28, 0.6),
-            icon_bg_color: Color::from_rgba(0.18, 0.18, 0.22, 0.7),
-            icon_bg_hover_color: Color::from_rgba(0.28, 0.28, 0.34, 0.8),
-            text_color: Color::from_rgba(0.95, 0.95, 0.95, 1.0),
-            text_subtle_color: Color::from_rgba(0.6, 0.6, 0.6, 0.9),
-        }
-    }
-
-    /// Light theme (for future use)
-    #[allow(dead_code)]
-    fn light() -> Self {
-        Self {
-            bg_color: Color::from_rgba(0.95, 0.95, 0.96, 0.95),
-            segment_color: Color::from_rgba(0.92, 0.92, 0.93, 0.95),
-            segment_hover_color: Color::from_rgba(0.85, 0.85, 0.88, 0.95),
-            center_color: Color::from_rgba(0.98, 0.98, 0.98, 0.98),
-            border_color: Color::from_rgba(0.75, 0.75, 0.78, 0.5),
-            icon_bg_color: Color::from_rgba(0.88, 0.88, 0.90, 0.7),
-            icon_bg_hover_color: Color::from_rgba(0.80, 0.80, 0.84, 0.8),
-            text_color: Color::from_rgba(0.1, 0.1, 0.1, 1.0),
-            text_subtle_color: Color::from_rgba(0.4, 0.4, 0.4, 0.9),
-        }
-    }
-
-    /// Get theme based on system preference
+    /// Get theme from COSMIC's active theme
     fn current() -> Self {
-        if is_dark_mode() {
-            Self::dark()
-        } else {
-            Self::light()
+        let theme = cosmic::theme::active();
+        let cosmic = theme.cosmic();
+
+        // Use background container for the pie menu base
+        let bg = &cosmic.background;
+        let primary = &cosmic.primary;
+
+        // Base background with high opacity for the pie
+        let bg_color = srgba_to_color(bg.base, 0.95);
+
+        // Segments use primary component colors
+        let segment_color = srgba_to_color(primary.component.base, 0.95);
+        let segment_hover_color = srgba_to_color(primary.component.hover, 0.95);
+
+        // Center area slightly different from background
+        let center_color = srgba_to_color(bg.base, 0.98);
+
+        // Divider color from theme
+        let border_color = srgba_to_color(bg.divider, 0.6);
+
+        // Icon backgrounds use component colors with transparency
+        let icon_bg_color = srgba_to_color(primary.component.base, 0.7);
+        let icon_bg_hover_color = srgba_to_color(primary.component.hover, 0.8);
+
+        // Text color from theme
+        let text_color = srgba_to_color_full(bg.on);
+
+        // Running indicator - use a subtle version of the text color
+        let running_indicator_color = srgba_to_color(bg.on, 0.5);
+
+        Self {
+            bg_color,
+            segment_color,
+            segment_hover_color,
+            center_color,
+            border_color,
+            icon_bg_color,
+            icon_bg_hover_color,
+            text_color,
+            running_indicator_color,
         }
     }
 }
@@ -803,16 +818,10 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                                 ));
                             }
                         });
-                        // Use theme-appropriate color for running indicator
-                        let arc_color = if is_dark_mode() {
-                            Color::from_rgb(0.5, 0.5, 0.5)  // Grey for dark mode
-                        } else {
-                            Color::from_rgb(0.4, 0.4, 0.4)  // Darker grey for light mode
-                        };
                         frame.stroke(
                             &arc,
                             Stroke::default()
-                                .with_color(arc_color)
+                                .with_color(theme.running_indicator_color)
                                 .with_width(3.0),
                         );
                     }
