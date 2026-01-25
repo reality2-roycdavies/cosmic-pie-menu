@@ -1,6 +1,6 @@
 [package]
 name = "cosmic-pie-menu"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 authors = ["Roy C. Davies"]
 license = "GPL-3.0"
