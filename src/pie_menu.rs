@@ -123,9 +123,9 @@ fn srgba_to_color_full(srgba: cosmic::theme::CosmicColor) -> Color {
 }
 
 impl PieTheme {
-    /// Get theme from COSMIC's active theme
+    /// Get theme from COSMIC's system preference
     fn current() -> Self {
-        let theme = cosmic::theme::active();
+        let theme = cosmic::theme::system_preference();
         let cosmic = theme.cosmic();
 
         // Use background container for the pie menu base
@@ -513,8 +513,13 @@ impl<'a> Program<Message> for PieCanvas<'a> {
         let center = if let Some((cx, cy)) = self.cursor_position {
             // Clamp to keep menu fully visible (same logic as draw)
             let half_menu = menu_size / 2.0;
-            let x = cx.clamp(half_menu, bounds.width - half_menu);
-            let y = cy.clamp(half_menu, bounds.height - half_menu);
+            // Handle case where screen is smaller than menu
+            let min_x = half_menu.min(bounds.width - half_menu);
+            let max_x = half_menu.max(bounds.width - half_menu);
+            let min_y = half_menu.min(bounds.height - half_menu);
+            let max_y = half_menu.max(bounds.height - half_menu);
+            let x = cx.clamp(min_x, max_x);
+            let y = cy.clamp(min_y, max_y);
             Point::new(x, y)
         } else {
             Point::new(bounds.width / 2.0, bounds.height / 2.0)
@@ -637,8 +642,13 @@ impl<'a> Program<Message> for PieCanvas<'a> {
             let center = if let Some((cx, cy)) = self.cursor_position {
                 // Clamp to keep menu fully visible
                 let half_menu = menu_size / 2.0;
-                let x = cx.clamp(half_menu, bounds.width - half_menu);
-                let y = cy.clamp(half_menu, bounds.height - half_menu);
+                // Handle case where screen is smaller than menu
+                let min_x = half_menu.min(bounds.width - half_menu);
+                let max_x = half_menu.max(bounds.width - half_menu);
+                let min_y = half_menu.min(bounds.height - half_menu);
+                let max_y = half_menu.max(bounds.height - half_menu);
+                let x = cx.clamp(min_x, max_x);
+                let y = cy.clamp(min_y, max_y);
                 Point::new(x, y)
             } else {
                 Point::new(bounds.width / 2.0, bounds.height / 2.0)
