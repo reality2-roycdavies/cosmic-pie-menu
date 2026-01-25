@@ -803,18 +803,18 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                     });
                 }
 
-                // Draw running indicator (arc near inner circle)
+                // Draw running indicator (arc at outer edge)
                 if slice.is_running {
-                    let arc_radius = self.inner_radius + 8.0;
+                    let arc_radius = self.menu_radius + 7.0;
                     // Shorten the arc slightly to leave gaps between slices
-                    let arc_padding = 0.08; // radians
+                    let arc_padding = 0.06; // radians
                     let arc_start = slice.start_angle + arc_padding;
                     let arc_end = slice.end_angle - arc_padding;
 
                     if arc_end > arc_start {
                         let arc = Path::new(|builder| {
                             // Draw arc using line segments
-                            let steps = 12;
+                            let steps = 16;
                             let angle_step = (arc_end - arc_start) / steps as f32;
                             builder.move_to(Point::new(
                                 center.x + arc_radius * arc_start.cos(),
@@ -838,17 +838,23 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                 }
             }
 
-            // Draw inner circle (center area)
-            let inner_circle = Path::circle(center, self.inner_radius);
-            frame.fill(&inner_circle, theme.center_color);
-
-            // Inner circle border
-            frame.stroke(
-                &inner_circle,
-                Stroke::default()
-                    .with_color(theme.border_color)
-                    .with_width(1.5),
-            );
+            // Draw inner circle with gradient fade (no hard edge)
+            // Draw concentric circles from outside to inside with increasing opacity
+            let num_rings = 20;
+            let base_color = theme.center_color;
+            for i in 0..num_rings {
+                let t = i as f32 / num_rings as f32; // 0.0 at edge, approaching 1.0 at center
+                let radius = self.inner_radius * (1.0 - t);
+                // Alpha increases towards center: starts at 0, reaches full at center
+                let alpha = t * t * base_color.a; // Quadratic ease for smoother fade
+                let ring_color = Color::from_rgba(base_color.r, base_color.g, base_color.b, alpha);
+                let ring = Path::circle(center, radius);
+                frame.fill(&ring, ring_color);
+            }
+            // Draw solid center core for text readability
+            let core_radius = self.inner_radius * 0.6;
+            let core = Path::circle(center, core_radius);
+            frame.fill(&core, theme.center_color);
 
             // Draw hovered app name in center, wrapped by words
             if !self.hovered_name.is_empty() {
