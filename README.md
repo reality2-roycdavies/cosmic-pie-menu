@@ -5,7 +5,9 @@ A radial/pie menu app launcher for the [COSMIC desktop environment](https://syst
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)
 
-![COSMIC Pie Menu Screenshot](docs/images/screenshot.png)
+| Dark Theme | Light Theme |
+|:----------:|:-----------:|
+| ![Dark Theme](screenshots/dark-theme.png) | ![Light Theme](screenshots/light-theme.png) |
 
 ## About This Project
 
@@ -21,21 +23,22 @@ All three projects serve as case studies in AI-assisted software development, wi
 ## Features
 
 - **Radial Layout**: Apps arranged in a circular pie menu for quick access
+- **COSMIC Theme Integration**: Colors automatically match your COSMIC desktop theme (light/dark)
+- **Smooth Visual Effects**: Segments fade from transparent at center to solid at edges
+- **Accent Color Highlighting**: Hover uses your theme's accent color
+- **Running App Indicators**: Outer ring shows which apps are running using theme accent color
 - **Touchpad Gesture**: Configurable 3 or 4 finger tap to open menu at cursor position
 - **Dock Integration**: Automatically reads favorites from COSMIC dock configuration
 - **Dock Applets**: Includes App Library, Launcher, and Workspaces buttons from your dock
-- **Running App Detection**: Shows which apps are currently running with arc indicators
 - **Right-Click to Switch**: Right-click a running app to switch to its window instead of launching a new instance
 - **Non-Favorite Running Apps**: Displays running apps that aren't dock favorites
 - **Dynamic Sizing**: Menu radius scales based on number of apps
 - **Dynamic Icon Positioning**: Icons positioned optimally based on pie size
 - **Icon Support**: Displays app icons (SVG and PNG) with fallback to initials
-- **Hover Highlighting**: Subtle segment highlighting as you move the mouse
-- **Center Display**: Shows app name in the center when hovering
-- **Transparent Background**: Only the circular menu is visible
+- **Center Display**: Shows app name with readable background pill when hovering
+- **Transparent Center**: See through to your desktop in the center of the menu
 - **Keyboard Support**: Press Escape to close, or click the center
 - **System Tray**: Theme-aware tray icon for click-to-open access
-- **Theme Support**: Tray icon adapts to light/dark mode changes
 - **Autostart**: Automatically creates autostart entry on first run
 - **Scaled Display Support**: Works correctly on HiDPI/scaled displays
 - **Suspend/Resume Safe**: Uses full-screen layer surface for reliable display
@@ -244,7 +247,7 @@ cosmic-pie-menu/
 │   ├── apps.rs       # Desktop file parsing and icon lookup
 │   ├── config.rs     # Config loading (dock favorites + gesture settings)
 │   ├── gesture.rs    # Touchpad gesture detection (evdev)
-│   ├── pie_menu.rs   # Radial menu UI (canvas-based)
+│   ├── pie_menu.rs   # Radial menu UI (canvas-based with theme integration)
 │   ├── settings.rs   # Settings window UI
 │   ├── tray.rs       # System tray icon with gesture feedback
 │   └── windows.rs    # Running app detection via Wayland protocol
@@ -253,6 +256,7 @@ cosmic-pie-menu/
 │   ├── DEVELOPMENT.md        # Technical learnings
 │   ├── THEMATIC_ANALYSIS.md  # AI collaboration patterns
 │   └── transcripts/          # Full development conversation
+├── screenshots/              # Application screenshots
 ├── Cargo.toml
 ├── cosmic-pie-menu.desktop
 ├── LICENSE
@@ -328,6 +332,8 @@ From developing this project, several notable patterns emerged:
 - **Layer-Shell for Overlays**: COSMIC/Wayland's layer-shell protocol enables floating overlay windows without traditional window decorations.
 
 - **Arc Drawing Quirks**: Standard canvas `arc()` functions behaved unexpectedly. Manual line-segment approximation gave predictable results.
+
+- **Theme Integration**: COSMIC themes accessed via `cosmic::theme::system_preference()` provide consistent colors. Using `background.component` colors matches dock/panel appearance. Gradients simulated with concentric ring strokes (no native gradient support in iced canvas).
 
 - **Icon Discovery Complexity**: Finding the right icon involves multiple paths (system themes, Flatpak, alternate names) and format handling (SVG vs PNG). App IDs like "Slack" need fuzzy matching to find "com.slack.Slack.desktop".
 
