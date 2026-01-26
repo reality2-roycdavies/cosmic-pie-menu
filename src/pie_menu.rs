@@ -662,93 +662,100 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                 Color::TRANSPARENT,
             );
 
-            // Draw background circle
-            let bg_circle = Path::circle(center, self.menu_radius + 10.0);
-            frame.fill(&bg_circle, theme.bg_color);
+            // Draw background: transparent at inner edge, fading to solid, then fading to transparent at outer edge
+            let bg_color = theme.bg_color;
+            let bg_outer = self.menu_radius + 10.0;
+            let bg_inner = self.inner_radius;
+            let bg_num_rings: usize = 50;
+            let bg_ring_width = (bg_outer - bg_inner) / bg_num_rings as f32;
 
-            // Draw each slice segment as an annular (ring) segment
+            for i in 0..bg_num_rings {
+                let stroke_radius = bg_inner + (i as f32 + 0.5) * bg_ring_width;
+                let progress = i as f32 / (bg_num_rings - 1) as f32; // 0 = inner, 1 = outer
+
+                // Fade in from transparent (0-40%), solid (40-80%), fade out (80-100%)
+                let alpha = if progress < 0.4 {
+                    // Fade in from transparent at inner edge
+                    let fade_progress = progress / 0.4;
+                    bg_color.a * fade_progress
+                } else if progress > 0.8 {
+                    // Fade out to transparent at outer edge
+                    let fade_progress = (progress - 0.8) / 0.2;
+                    bg_color.a * (1.0 - fade_progress)
+                } else {
+                    // Solid middle
+                    bg_color.a
+                };
+
+                let ring_color = Color::from_rgba(bg_color.r, bg_color.g, bg_color.b, alpha);
+                let ring_path = Path::circle(center, stroke_radius);
+                frame.stroke(
+                    &ring_path,
+                    Stroke::default()
+                        .with_color(ring_color)
+                        .with_width(bg_ring_width + 0.5),
+                );
+            }
+
+            // Draw each slice segment with fade at inner edge
             for slice in self.slices {
                 let is_hovered = self.hovered == Some(slice.index);
 
-                // Draw the annular segment (donut slice between inner and outer radius)
                 let outer_radius = self.menu_radius + 5.0;
                 let inner_radius = self.inner_radius + 2.0;
+                let segment_depth = outer_radius - inner_radius;
 
-                // Calculate the 4 corners of the annular segment
-                let outer_start = Point::new(
-                    center.x + outer_radius * slice.start_angle.cos(),
-                    center.y + outer_radius * slice.start_angle.sin(),
-                );
-                let outer_end = Point::new(
-                    center.x + outer_radius * slice.end_angle.cos(),
-                    center.y + outer_radius * slice.end_angle.sin(),
-                );
-                let inner_end = Point::new(
-                    center.x + inner_radius * slice.end_angle.cos(),
-                    center.y + inner_radius * slice.end_angle.sin(),
-                );
-                let inner_start = Point::new(
-                    center.x + inner_radius * slice.start_angle.cos(),
-                    center.y + inner_radius * slice.start_angle.sin(),
-                );
-
-                // Build the annular segment path
-                // We'll use multiple points along the arcs for smooth curves
-                let segment = Path::new(|builder| {
-                    // Start at outer edge, start angle
-                    builder.move_to(outer_start);
-
-                    // Draw outer arc using small line segments
-                    let steps = 20;
-                    let angle_step = (slice.end_angle - slice.start_angle) / steps as f32;
-                    for i in 1..=steps {
-                        let angle = slice.start_angle + angle_step * i as f32;
-                        let point = Point::new(
-                            center.x + outer_radius * angle.cos(),
-                            center.y + outer_radius * angle.sin(),
-                        );
-                        builder.line_to(point);
-                    }
-
-                    // Line to inner edge at end angle
-                    builder.line_to(inner_end);
-
-                    // Draw inner arc back (reverse direction)
-                    for i in (0..steps).rev() {
-                        let angle = slice.start_angle + angle_step * i as f32;
-                        let point = Point::new(
-                            center.x + inner_radius * angle.cos(),
-                            center.y + inner_radius * angle.sin(),
-                        );
-                        builder.line_to(point);
-                    }
-
-                    builder.close();
-                });
-
-                // Subtle color shift for hover
-                let segment_color = if is_hovered {
+                // Base color for this segment
+                let base_color = if is_hovered {
                     theme.segment_hover_color
                 } else {
                     theme.segment_color
                 };
-                frame.fill(&segment, segment_color);
 
-                // Draw slice divider line
-                let divider = Path::new(|builder| {
-                    let inner_x = center.x + inner_radius * slice.start_angle.cos();
-                    let inner_y = center.y + inner_radius * slice.start_angle.sin();
-                    let outer_x = center.x + outer_radius * slice.start_angle.cos();
-                    let outer_y = center.y + outer_radius * slice.start_angle.sin();
-                    builder.move_to(Point::new(inner_x, inner_y));
-                    builder.line_to(Point::new(outer_x, outer_y));
-                });
-                frame.stroke(
-                    &divider,
-                    Stroke::default()
-                        .with_color(theme.border_color)
-                        .with_width(1.0),
-                );
+                // Draw segment as concentric arc-strokes with fading alpha at inner edge
+                let num_rings = 40;
+                let ring_width = segment_depth / num_rings as f32;
+                let fade_rings = 16; // Number of rings that fade at inner edge
+
+                for r in 0..num_rings {
+                    let ring_radius = inner_radius + (r as f32 + 0.5) * ring_width;
+
+                    // Fade alpha for inner rings
+                    let alpha = if r < fade_rings {
+                        let fade_progress = r as f32 / fade_rings as f32;
+                        base_color.a * fade_progress
+                    } else {
+                        base_color.a
+                    };
+
+                    let ring_color = Color::from_rgba(base_color.r, base_color.g, base_color.b, alpha);
+
+                    // Draw arc for this ring
+                    let arc = Path::new(|builder| {
+                        let steps = 16;
+                        let angle_step = (slice.end_angle - slice.start_angle) / steps as f32;
+                        builder.move_to(Point::new(
+                            center.x + ring_radius * slice.start_angle.cos(),
+                            center.y + ring_radius * slice.start_angle.sin(),
+                        ));
+                        for i in 1..=steps {
+                            let angle = slice.start_angle + angle_step * i as f32;
+                            builder.line_to(Point::new(
+                                center.x + ring_radius * angle.cos(),
+                                center.y + ring_radius * angle.sin(),
+                            ));
+                        }
+                    });
+
+                    frame.stroke(
+                        &arc,
+                        Stroke::default()
+                            .with_color(ring_color)
+                            .with_width(ring_width + 0.5),
+                    );
+                }
+
+                // Divider lines removed for cleaner look with fading segments
 
                 // Calculate icon position using dynamic formula
                 let icon_radius = calculate_icon_radius(self.menu_radius, self.inner_radius, self.slices.len());
@@ -838,37 +845,92 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                 }
             }
 
-            // Draw inner circle with gradient fade (no hard edge)
-            // Draw concentric circles from outside to inside with increasing opacity
-            let num_rings = 20;
-            let base_color = theme.center_color;
-            for i in 0..num_rings {
-                let t = i as f32 / num_rings as f32; // 0.0 at edge, approaching 1.0 at center
-                let radius = self.inner_radius * (1.0 - t);
-                // Alpha increases towards center: starts at 0, reaches full at center
-                let alpha = t * t * base_color.a; // Quadratic ease for smoother fade
-                let ring_color = Color::from_rgba(base_color.r, base_color.g, base_color.b, alpha);
-                let ring = Path::circle(center, radius);
-                frame.fill(&ring, ring_color);
-            }
-            // Draw solid center core for text readability
-            let core_radius = self.inner_radius * 0.6;
-            let core = Path::circle(center, core_radius);
-            frame.fill(&core, theme.center_color);
+            // Inner circle is completely transparent - nothing drawn here
+            // The fade happens in the background/segments from inner edge outward
 
-            // Draw hovered app name in center, wrapped by words
+            // Draw hovered app name in center with background pill for readability
             if !self.hovered_name.is_empty() {
                 let words: Vec<&str> = self.hovered_name.split_whitespace().collect();
-                let line_height = 16.0;
+                let font_size = 16.0;
+                let line_height = 20.0;
                 let total_height = words.len() as f32 * line_height;
                 let start_y = center.y - total_height / 2.0 + line_height / 2.0;
 
+                // Estimate text width (rough approximation)
+                let max_word_len = words.iter().map(|w| w.len()).max().unwrap_or(0);
+                let text_width = (max_word_len as f32 * font_size * 0.6).max(60.0);
+
+                // Draw semi-transparent background pill
+                let padding_x = 16.0;
+                let padding_y = 10.0;
+                let pill_width = text_width + padding_x * 2.0;
+                let pill_height = total_height + padding_y * 2.0;
+                let pill_radius = pill_height / 2.0; // Fully rounded ends
+
+                let pill = Path::new(|builder| {
+                    // Draw rounded rectangle (pill shape)
+                    let left = center.x - pill_width / 2.0;
+                    let right = center.x + pill_width / 2.0;
+                    let top = center.y - pill_height / 2.0;
+                    let bottom = center.y + pill_height / 2.0;
+                    let r = pill_radius.min(pill_width / 2.0);
+
+                    // Start at top-left after the curve
+                    builder.move_to(Point::new(left + r, top));
+                    // Top edge
+                    builder.line_to(Point::new(right - r, top));
+                    // Top-right curve (approximate with lines)
+                    for i in 0..=8 {
+                        let angle = -PI / 2.0 + (i as f32 / 8.0) * (PI / 2.0);
+                        builder.line_to(Point::new(
+                            right - r + r * angle.cos(),
+                            top + r + r * angle.sin(),
+                        ));
+                    }
+                    // Right edge
+                    builder.line_to(Point::new(right, bottom - r));
+                    // Bottom-right curve
+                    for i in 0..=8 {
+                        let angle = 0.0 + (i as f32 / 8.0) * (PI / 2.0);
+                        builder.line_to(Point::new(
+                            right - r + r * angle.cos(),
+                            bottom - r + r * angle.sin(),
+                        ));
+                    }
+                    // Bottom edge
+                    builder.line_to(Point::new(left + r, bottom));
+                    // Bottom-left curve
+                    for i in 0..=8 {
+                        let angle = PI / 2.0 + (i as f32 / 8.0) * (PI / 2.0);
+                        builder.line_to(Point::new(
+                            left + r + r * angle.cos(),
+                            bottom - r + r * angle.sin(),
+                        ));
+                    }
+                    // Left edge
+                    builder.line_to(Point::new(left, top + r));
+                    // Top-left curve
+                    for i in 0..=8 {
+                        let angle = PI + (i as f32 / 8.0) * (PI / 2.0);
+                        builder.line_to(Point::new(
+                            left + r + r * angle.cos(),
+                            top + r + r * angle.sin(),
+                        ));
+                    }
+                    builder.close();
+                });
+
+                // Semi-transparent dark background
+                let pill_color = Color::from_rgba(0.0, 0.0, 0.0, 0.7);
+                frame.fill(&pill, pill_color);
+
+                // Draw text
                 for (i, word) in words.iter().enumerate() {
                     frame.fill_text(Text {
                         content: word.to_string(),
                         position: Point::new(center.x, start_y + i as f32 * line_height),
-                        color: theme.text_color,
-                        size: 13.0.into(),
+                        color: Color::WHITE,
+                        size: font_size.into(),
                         font: Font::DEFAULT,
                         horizontal_alignment: Horizontal::Center,
                         vertical_alignment: Vertical::Center,
