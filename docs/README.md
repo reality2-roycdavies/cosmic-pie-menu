@@ -42,6 +42,9 @@ From developing this project, some notable observations:
 - **Platform-specific icons** - COSMIC provides its own icons that match dock styling at `/usr/share/icons/hicolor/scalable/apps/`
 - **Dynamic formulas over fixed ratios** - Layout calculations should adapt to context (number of items, available space)
 - **Project patterns transfer** - Solutions from sibling projects (autostart, theme detection) apply directly
+- **Theme color integration** - Use `cosmic::theme::system_preference()` and `background.component` colors to match dock
+- **Gradient simulation** - Non-overlapping stroked rings create clean gradients without native gradient support
+- **Transparency compositing** - Understanding the full rendering stack is essential for transparency effects
 
 ## Unique Challenges in This Project
 

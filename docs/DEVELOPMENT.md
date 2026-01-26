@@ -928,6 +928,198 @@ if check_pending_trigger(&mut state) {
 
 ---
 
+## COSMIC Theme Color Integration
+
+### The Challenge
+
+Make the pie menu visually consistent with the COSMIC desktop, automatically adapting to light/dark themes and user color preferences.
+
+### Discovery: Theme Color Sources
+
+| API | Behavior |
+|-----|----------|
+| `cosmic::theme::active()` | Returns default theme, not user's |
+| `cosmic::theme::system_preference()` | Returns user's actual theme |
+
+### Color Palette Structure
+
+COSMIC themes have nested color containers:
+
+```rust
+theme.cosmic().background    // Window/panel backgrounds
+    .base                    // Base background color
+    .component.base          // Component backgrounds (like dock)
+    .component.hover         // Hover state
+    .divider                 // Border/divider lines
+    .on                      // Text/foreground color
+
+theme.cosmic().accent        // Accent colors
+    .base                    // Primary accent
+```
+
+### Solution
+
+Use `background.component` colors to match dock appearance:
+
+```rust
+fn current() -> Self {
+    let theme = cosmic::theme::system_preference();
+    let cosmic = theme.cosmic();
+    let bg = &cosmic.background;
+    let accent = &cosmic.accent;
+
+    // Segments match dock
+    let segment_color = srgba_to_color(bg.component.base, 0.95);
+
+    // Hover uses accent color
+    let segment_hover_color = srgba_to_color(accent.base, 0.85);
+
+    // Running indicators use accent for visibility
+    let running_indicator_color = srgba_to_color(accent.base, 0.9);
+}
+```
+
+**Key insight:** The dock uses `background.component` colors, not `primary` colors. Using the same source ensures visual consistency.
+
+---
+
+## Gradient Effects Without Native Gradients
+
+### The Challenge
+
+Create smooth fade effects (transparent center, fading segment edges) when iced's canvas doesn't support radial gradients.
+
+### Failed Approaches
+
+| Approach | Problem |
+|----------|---------|
+| Overlapping semi-transparent circles | Alpha values accumulate, creating banding |
+| Stroked rings with overlap (+0.5px) | Moiré patterns from blending |
+| Filled annular paths with winding rule | Holes didn't render correctly |
+
+### Solution: Non-Overlapping Stroked Rings
+
+Draw concentric ring strokes with exact widths (no overlap):
+
+```rust
+let num_rings = 60;  // More rings = smoother gradient
+let ring_width = segment_depth / num_rings as f32;
+let fade_rings = 24;  // Rings that participate in fade
+
+for r in 0..num_rings {
+    let ring_radius = inner_radius + (r as f32 + 0.5) * ring_width;
+
+    // Calculate alpha: solid for outer rings, fading for inner
+    let alpha = if r < fade_rings {
+        let fade_progress = r as f32 / fade_rings as f32;
+        base_color.a * fade_progress
+    } else {
+        base_color.a
+    };
+
+    frame.stroke(
+        &Path::circle(center, ring_radius),
+        Stroke::default()
+            .with_color(Color::from_rgba(r, g, b, alpha))
+            .with_width(ring_width),  // Exact width, no overlap
+    );
+}
+```
+
+### Key Insights
+
+- **No overlap is critical**: Even 0.5px overlap causes visible banding
+- **More rings = smoother**: 60 rings for segments, 80 for background
+- **Performance is fine**: Drawing 100+ rings is fast enough for UI
+
+---
+
+## Transparency Stack Management
+
+### The Challenge
+
+The center appeared black instead of transparent, even when drawing "transparent" content.
+
+### Discovery Process
+
+Visual debugging revealed the issue:
+
+1. **Green border test**: Confirmed running correct binary
+2. **Red inner rings**: Confirmed rings were being drawn
+3. **Remove center drawing**: Still black → something else filling center
+4. **Remove background fill**: Center became transparent → background was the culprit
+
+### Root Cause
+
+The background was a filled circle covering the entire menu:
+
+```rust
+// BEFORE: Fills entire area including center
+let bg_circle = Path::circle(center, self.menu_radius + 10.0);
+frame.fill(&bg_circle, theme.bg_color);
+```
+
+### Solution
+
+Make background a donut shape that doesn't cover the center:
+
+```rust
+// AFTER: Donut shape, center open for transparency
+let bg_outer = self.menu_radius + 10.0;
+let bg_inner = self.inner_radius;
+
+// Draw as concentric rings, leaving center empty
+for i in 0..bg_num_rings {
+    let stroke_radius = bg_inner + (i as f32 + 0.5) * bg_ring_width;
+    // ... draw ring
+}
+```
+
+### Rendering Stack (Final)
+
+```
+1. Window background (transparent to compositor)
+2. Background rings (donut shape, center open)
+3. Outer indicator ring (themed color)
+4. Segment arc rings with fading alpha
+5. Icons
+6. Text with semi-transparent pill background
+7. Running indicators (accent color)
+```
+
+**Key insight:** Transparency is "transparent to what's below." If an opaque layer is below, you see that layer, not the window background.
+
+---
+
+## Text Readability Over Transparency
+
+### The Challenge
+
+Text in the transparent center was hard to read against varying desktop backgrounds.
+
+### Solution: Semi-Transparent Pill Background
+
+```rust
+// Calculate pill dimensions based on text
+let pill_width = text_width + padding_x * 2.0;
+let pill_height = total_height + padding_y * 2.0;
+let pill_radius = pill_height / 2.0;
+
+// Draw rounded rectangle
+let pill = Path::new(|builder| {
+    // ... build rounded rectangle path
+});
+
+frame.fill(&pill, Color::from_rgba(0.0, 0.0, 0.0, 0.7));
+
+// Draw text on top
+frame.fill_text(Text { ... });
+```
+
+**Key insight:** When text appears over variable backgrounds, a local background ensures consistent readability.
+
+---
+
 ## Resources
 
 ### Crates Used

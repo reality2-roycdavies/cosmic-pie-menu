@@ -712,6 +712,185 @@ cosmic-pie-menu is the most complex project, combining all patterns from previou
 
 ---
 
+## Theme 24: COSMIC Theme Integration
+
+### Pattern
+
+Making the pie menu visually consistent with COSMIC required discovering and using the correct theme colors:
+
+| Attempt | Color Source | Result |
+|---------|--------------|--------|
+| Hardcoded colors | Dark gray, blue | Looked foreign to COSMIC |
+| `cosmic::theme::active()` | Current theme | Returned defaults, not user's theme |
+| `cosmic::theme::system_preference()` | System theme | Correct user theme colors |
+| `primary.component.base` | Primary palette | Wrong shade, didn't match dock |
+| `background.component.base` | Background palette | Matched dock exactly |
+
+### Analysis
+
+COSMIC themes have multiple color containers (`background`, `primary`, `accent`) each with nested components (`base`, `hover`, `component.base`, etc.). The dock uses `background.component` colors, so using those for the pie menu creates visual consistency.
+
+### Implementation
+
+```rust
+fn current() -> Self {
+    let theme = cosmic::theme::system_preference();
+    let cosmic = theme.cosmic();
+    let bg = &cosmic.background;
+    let accent = &cosmic.accent;
+
+    let segment_color = srgba_to_color(bg.component.base, 0.95);
+    let segment_hover_color = srgba_to_color(accent.base, 0.85);
+    // ...
+}
+```
+
+### Implication
+
+When integrating with a desktop environment, use the same color sources as native components for visual consistency.
+
+---
+
+## Theme 25: Simulating Gradients Without Native Support
+
+### Pattern
+
+iced's canvas doesn't support native radial gradients. Creating a fade effect required creative workarounds:
+
+| Approach | Result |
+|----------|--------|
+| Single filled circle | No gradient possible |
+| Overlapping semi-transparent circles | Alpha accumulation created banding |
+| Stroked rings with overlap | Moiré patterns from alpha blending |
+| Stroked rings without overlap | Clean gradients |
+
+### Solution
+
+Draw concentric ring strokes with precisely calculated positions to avoid overlap:
+
+```rust
+let num_rings = 60;
+let ring_width = segment_depth / num_rings as f32;
+
+for r in 0..num_rings {
+    let ring_radius = inner_radius + (r as f32 + 0.5) * ring_width;
+    let alpha = calculate_fade_alpha(r, num_rings, fade_rings);
+
+    frame.stroke(
+        &Path::circle(center, ring_radius),
+        Stroke::default()
+            .with_color(Color::from_rgba(r, g, b, alpha))
+            .with_width(ring_width),  // Exact width, no overlap
+    );
+}
+```
+
+### Key Insight
+
+When overlapping semi-transparent shapes, alpha values accumulate unpredictably. Non-overlapping shapes with individual alpha values produce predictable gradients.
+
+### Implication
+
+Gradient effects without native gradient support require careful geometry to avoid visual artifacts.
+
+---
+
+## Theme 26: Debugging Transparency with Visual Markers
+
+### Pattern
+
+When gradient effects weren't appearing despite code changes, visual debugging helped identify the root cause:
+
+| Debug Step | Discovery |
+|------------|-----------|
+| Add bright green border | Confirmed running correct binary |
+| Make inner rings bright red | Confirmed rings were being drawn |
+| Remove background circle entirely | Center showed black, not transparent |
+| Make background a donut shape | Center became truly transparent |
+
+### Root Cause
+
+The background was drawn as a filled circle covering the entire menu area. The "transparent" center was actually showing the opaque background, not true transparency.
+
+### Analysis
+
+Visual debugging with obvious markers (bright colors, removed elements) quickly isolated the issue. Without visual markers, the problem appeared to be with alpha values when it was actually a drawing order issue.
+
+### Implication
+
+When visual effects don't work as expected, add obvious visual markers to confirm which code paths are executing and what's actually being rendered.
+
+---
+
+## Theme 27: Layered Transparency Requirements
+
+### Pattern
+
+Achieving the desired visual effect required understanding the full drawing stack:
+
+```
+Layer 1: Window background (transparent)
+Layer 2: Background ring (opaque, donut shape - center open)
+Layer 3: Outer indicator ring (themed color)
+Layer 4: Segment arcs with fading alpha
+Layer 5: Icons and text with pill background
+Layer 6: Running indicators (accent color)
+```
+
+### Analysis
+
+Each layer's transparency interacts with layers below. The segment fade couldn't work until the background stopped filling the center. The text needed its own background pill because it sits over the transparent center.
+
+### Implication
+
+Complex transparency effects require understanding the complete rendering stack. Each layer's alpha behavior affects all subsequent layers.
+
+---
+
+## Theme 28: Reading User Intent Through Iteration
+
+### Pattern
+
+The visual style evolved through rapid iteration with user feedback:
+
+| User Statement | Interpretation | Change Made |
+|----------------|----------------|-------------|
+| "fade is only in the middle" | Fade zone too small | Increased fade_rings ratio |
+| "should not see background at all" | Don't want transparency to desktop | Changed to color blend instead |
+| "inner should be transparent, fade to solid" | DO want transparency | Reverted, fixed background shape |
+| "need larger text, hard to read" | Readability issue over transparency | Added pill background behind text |
+| "moire effect visible" | Ring overlap causing artifacts | Removed overlap, increased ring count |
+
+### Analysis
+
+User descriptions of visual issues often require interpretation. "Fade not working" could mean wrong direction, wrong range, or wrong colors. Screenshots and specific descriptions narrow down the actual issue.
+
+### Implication
+
+Visual refinement requires tight feedback loops. The AI proposes solutions; the user evaluates results; together they converge on the intended effect.
+
+---
+
+## Comparative Analysis Across Three Projects (Final)
+
+| Aspect | cosmic-bing-wallpaper | cosmic-runkat | cosmic-pie-menu |
+|--------|----------------------|---------------|-----------------|
+| Primary UI | Settings window | Tray icon only | Canvas overlay + Settings |
+| Complexity | Medium | Medium | High |
+| Platform Discovery | Config paths, D-Bus | Animation timing | Wayland protocols, evdev, themes |
+| Iterations | ~5 major | ~4 major | ~25+ major |
+| Unique Challenge | Wallpaper setting API | CPU monitoring smoothing | Radial geometry, theme integration |
+| Wayland Depth | Surface | Minimal | Deep + bypassed for input |
+| Input Method | Click only | Click only | Click + gesture |
+| Theme Integration | Basic (dark/light) | Basic (dark/light) | Full (colors from palette) |
+| Visual Effects | None | Animation | Gradients, transparency, fades |
+
+### Trend
+
+cosmic-pie-menu pushed visual polish further than previous projects, requiring understanding of theme color systems, transparency compositing, and gradient simulation techniques.
+
+---
+
 ## Conclusions
 
 1. **Visual feedback is essential** - UI development requires seeing results, not just reading code
@@ -751,3 +930,11 @@ cosmic-pie-menu is the most complex project, combining all patterns from previou
 18. **Subprocess spawning for GUIs** - Avoids main-thread event loop requirements
 
 19. **Debounce multi-finger transitions** - Handle ambiguous finger count transitions with timed cancellation
+
+20. **Use correct theme color sources** - Match native component colors for visual consistency
+
+21. **Simulate gradients with non-overlapping shapes** - Avoid alpha accumulation artifacts
+
+22. **Visual debugging with markers** - Bright colors and removed elements isolate rendering issues
+
+23. **Understand the rendering stack** - Transparency effects depend on all layers below
