@@ -14,14 +14,21 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Get the path to COSMIC's theme config file
-fn cosmic_theme_path() -> Option<PathBuf> {
+/// Get the path to COSMIC's theme mode config file
+fn cosmic_theme_mode_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("cosmic/com.system76.CosmicTheme.Mode/v1/is_dark"))
+}
+
+/// Get the path to the active theme directory
+fn cosmic_theme_dir() -> Option<PathBuf> {
+    let is_dark = is_dark_mode();
+    let theme_name = if is_dark { "Dark" } else { "Light" };
+    dirs::config_dir().map(|d| d.join(format!("cosmic/com.system76.CosmicTheme.{}/v1", theme_name)))
 }
 
 /// Detect if the system is in dark mode
 fn is_dark_mode() -> bool {
-    if let Some(path) = cosmic_theme_path() {
+    if let Some(path) = cosmic_theme_mode_path() {
         if let Ok(content) = fs::read_to_string(&path) {
             let trimmed = content.trim();
             // COSMIC stores "true" or "false"
@@ -32,26 +39,64 @@ fn is_dark_mode() -> bool {
     true
 }
 
-/// Get theme colors for the tray icon from COSMIC theme
+/// Parse a color from COSMIC theme RON format
+/// Looks for pattern like: red: 0.5, green: 0.3, blue: 0.2,
+fn parse_color_from_ron(content: &str, color_name: &str) -> Option<(u8, u8, u8)> {
+    // Find the color block by name (e.g., "base:" or "on:")
+    let search_pattern = format!("{}:", color_name);
+    let start_idx = content.find(&search_pattern)?;
+    let block_start = content[start_idx..].find('(')?;
+    let block_end = content[start_idx + block_start..].find(')')?;
+    let block = &content[start_idx + block_start..start_idx + block_start + block_end + 1];
+
+    // Extract red, green, blue values
+    let extract_float = |name: &str| -> Option<f32> {
+        let pattern = format!("{}: ", name);
+        let idx = block.find(&pattern)?;
+        let start = idx + pattern.len();
+        let end = block[start..].find(',')?;
+        block[start..start + end].trim().parse().ok()
+    };
+
+    let red = extract_float("red")?;
+    let green = extract_float("green")?;
+    let blue = extract_float("blue")?;
+
+    Some((
+        (red.clamp(0.0, 1.0) * 255.0) as u8,
+        (green.clamp(0.0, 1.0) * 255.0) as u8,
+        (blue.clamp(0.0, 1.0) * 255.0) as u8,
+    ))
+}
+
+/// Get theme colors for the tray icon by reading directly from config files
+/// This avoids potential caching issues with the cosmic::theme API
 fn get_theme_colors() -> ((u8, u8, u8), (u8, u8, u8)) {
-    let theme = cosmic::theme::system_preference();
-    let cosmic = theme.cosmic();
+    // Default colors (light gray for normal, cyan for triggered)
+    let default_normal = (200, 200, 200);
+    let default_triggered = (0, 200, 200);
 
-    // Normal icon color: use text/foreground color from background
-    let on_color = &cosmic.background.on;
-    let normal = (
-        (on_color.red * 255.0) as u8,
-        (on_color.green * 255.0) as u8,
-        (on_color.blue * 255.0) as u8,
-    );
+    let theme_dir = match cosmic_theme_dir() {
+        Some(dir) => dir,
+        None => return (default_normal, default_triggered),
+    };
 
-    // Triggered color: use accent color
-    let accent = &cosmic.accent.base;
-    let triggered = (
-        (accent.red * 255.0) as u8,
-        (accent.green * 255.0) as u8,
-        (accent.blue * 255.0) as u8,
-    );
+    // Read accent color (for triggered state)
+    let accent_path = theme_dir.join("accent");
+    let triggered = if let Ok(content) = fs::read_to_string(&accent_path) {
+        parse_color_from_ron(&content, "base").unwrap_or(default_triggered)
+    } else {
+        default_triggered
+    };
+
+    // Read background on color (for normal state)
+    let bg_path = theme_dir.join("background");
+    let normal = if let Ok(content) = fs::read_to_string(&bg_path) {
+        // The "on" color is the foreground color for text/icons
+        parse_color_from_ron(&content, "on").unwrap_or(default_normal)
+    } else {
+        default_normal
+    };
 
     (normal, triggered)
 }
@@ -267,9 +312,23 @@ fn create_pie_icon(_dark_mode: bool, triggered: bool) -> Vec<Icon> {
     }]
 }
 
+/// Get modification time of theme color files for change detection
+fn get_theme_files_mtime() -> Option<std::time::SystemTime> {
+    let theme_dir = cosmic_theme_dir()?;
+    let accent_path = theme_dir.join("accent");
+    let bg_path = theme_dir.join("background");
+
+    // Return the most recent modification time of either file
+    let accent_mtime = fs::metadata(&accent_path).ok()?.modified().ok()?;
+    let bg_mtime = fs::metadata(&bg_path).ok()?.modified().ok()?;
+
+    Some(accent_mtime.max(bg_mtime))
+}
+
 /// Inner tray run loop - returns reason for exit
 fn run_tray_inner(tx: Sender<TrayMessage>, feedback: GestureFeedback) -> Result<TrayExitReason, String> {
     let current_dark_mode = is_dark_mode();
+    let initial_mtime = get_theme_files_mtime();
 
     let tray = PieMenuTray {
         tx: tx.clone(),
@@ -286,6 +345,7 @@ fn run_tray_inner(tx: Sender<TrayMessage>, feedback: GestureFeedback) -> Result<
     let mut last_loop_time = Instant::now();
     let mut last_theme_check = Instant::now();
     let tracked_dark_mode = current_dark_mode;
+    let mut tracked_mtime = initial_mtime;
     let mut icon_highlighted = false;
 
     loop {
@@ -317,15 +377,26 @@ fn run_tray_inner(tx: Sender<TrayMessage>, feedback: GestureFeedback) -> Result<
             });
         }
 
-        // Check for theme changes every second
+        // Check for theme changes every second (both dark/light mode AND color file changes)
         if loop_start.duration_since(last_theme_check) > Duration::from_secs(1) {
             last_theme_check = loop_start;
+
+            // Check dark/light mode change
             let new_dark_mode = is_dark_mode();
             if new_dark_mode != tracked_dark_mode {
-                println!("Theme changed (dark_mode: {} -> {}), restarting tray...", tracked_dark_mode, new_dark_mode);
+                println!("Theme mode changed (dark_mode: {} -> {}), restarting tray...", tracked_dark_mode, new_dark_mode);
                 handle.shutdown();
                 return Ok(TrayExitReason::ThemeChanged);
             }
+
+            // Check if theme color files have been modified
+            let new_mtime = get_theme_files_mtime();
+            if new_mtime != tracked_mtime {
+                println!("Theme colors changed, restarting tray...");
+                handle.shutdown();
+                return Ok(TrayExitReason::ThemeChanged);
+            }
+            tracked_mtime = new_mtime;
         }
 
         // Sleep briefly
@@ -349,8 +420,8 @@ pub fn run_tray_with_sender(tx: Sender<TrayMessage>, feedback: GestureFeedback) 
                 continue;
             }
             Ok(TrayExitReason::ThemeChanged) => {
-                // Short delay then restart with new theme
-                std::thread::sleep(Duration::from_millis(100));
+                // Wait for theme files to be fully written before restarting
+                std::thread::sleep(Duration::from_millis(500));
                 continue;
             }
             Err(e) => {

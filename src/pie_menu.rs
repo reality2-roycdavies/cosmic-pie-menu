@@ -16,7 +16,6 @@ use cosmic::iced::{Element, Length, Task, Subscription};
 use cosmic::iced::alignment::{Horizontal, Vertical};
 use cosmic::iced::keyboard::{self, Key};
 use cosmic::iced::time;
-use cosmic::iced_core::layout::Limits;
 use cosmic::iced::platform_specific::runtime::wayland::layer_surface::SctkLayerSurfaceSettings;
 use cosmic::iced::platform_specific::shell::commands::layer_surface::{
     get_layer_surface, Anchor, KeyboardInteractivity, Layer,
@@ -98,14 +97,8 @@ struct PieTheme {
     segment_color: Color,
     /// Color of a segment when hovered (subtle shift)
     segment_hover_color: Color,
-    /// Center area background
-    center_color: Color,
     /// Border/divider color
     border_color: Color,
-    /// Icon background color
-    icon_bg_color: Color,
-    /// Icon background when hovered
-    icon_bg_hover_color: Color,
     /// Text color
     text_color: Color,
     /// Running indicator color
@@ -142,15 +135,8 @@ impl PieTheme {
         // Hover uses accent color from theme
         let segment_hover_color = srgba_to_color(accent.base, 0.85);
 
-        // Center area slightly different from background
-        let center_color = srgba_to_color(bg.base, 0.98);
-
         // Divider color from theme
         let border_color = srgba_to_color(bg.divider, 0.6);
-
-        // Icon backgrounds use background component colors
-        let icon_bg_color = srgba_to_color(bg.component.base, 0.7);
-        let icon_bg_hover_color = srgba_to_color(bg.component.hover, 0.8);
 
         // Text color from theme
         let text_color = srgba_to_color_full(bg.on);
@@ -165,10 +151,7 @@ impl PieTheme {
             bg_color,
             segment_color,
             segment_hover_color,
-            center_color,
             border_color,
-            icon_bg_color,
-            icon_bg_hover_color,
             text_color,
             running_indicator_color,
             indicator_ring_color,
@@ -284,7 +267,7 @@ impl PieMenuApp {
     fn new_at(apps: Vec<AppInfo>, position: Option<(f32, f32)>) -> (Self, Task<Message>) {
         let menu_radius = calculate_menu_radius(apps.len());
         let inner_radius = calculate_inner_radius(menu_radius);
-        let menu_size = (menu_radius * 2.0 + ICON_SIZE as f32 + 80.0) as f32;
+        let _menu_size = (menu_radius * 2.0 + ICON_SIZE as f32 + 80.0) as f32;
         // Always use full-screen mode for better layer surface compatibility
         let full_screen = true;
 
