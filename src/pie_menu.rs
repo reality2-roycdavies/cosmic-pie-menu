@@ -110,6 +110,8 @@ struct PieTheme {
     text_color: Color,
     /// Running indicator color
     running_indicator_color: Color,
+    /// Outer indicator ring background color
+    indicator_ring_color: Color,
 }
 
 /// Convert a COSMIC Srgba color to iced Color with custom alpha
@@ -128,16 +130,17 @@ impl PieTheme {
         let theme = cosmic::theme::system_preference();
         let cosmic = theme.cosmic();
 
-        // Use background container for the pie menu base
+        // Use background container for the pie menu (matches dock/panel colors)
         let bg = &cosmic.background;
-        let primary = &cosmic.primary;
+        let accent = &cosmic.accent;
 
         // Base background with high opacity for the pie
         let bg_color = srgba_to_color(bg.base, 0.95);
 
-        // Segments use primary component colors
-        let segment_color = srgba_to_color(primary.component.base, 0.95);
-        let segment_hover_color = srgba_to_color(primary.component.hover, 0.95);
+        // Segments use background component colors (same as dock)
+        let segment_color = srgba_to_color(bg.component.base, 0.95);
+        // Hover uses accent color from theme
+        let segment_hover_color = srgba_to_color(accent.base, 0.85);
 
         // Center area slightly different from background
         let center_color = srgba_to_color(bg.base, 0.98);
@@ -145,15 +148,18 @@ impl PieTheme {
         // Divider color from theme
         let border_color = srgba_to_color(bg.divider, 0.6);
 
-        // Icon backgrounds use component colors with transparency
-        let icon_bg_color = srgba_to_color(primary.component.base, 0.7);
-        let icon_bg_hover_color = srgba_to_color(primary.component.hover, 0.8);
+        // Icon backgrounds use background component colors
+        let icon_bg_color = srgba_to_color(bg.component.base, 0.7);
+        let icon_bg_hover_color = srgba_to_color(bg.component.hover, 0.8);
 
         // Text color from theme
         let text_color = srgba_to_color_full(bg.on);
 
-        // Running indicator - use a subtle version of the text color
-        let running_indicator_color = srgba_to_color(bg.on, 0.5);
+        // Running indicator - use accent color for visibility
+        let running_indicator_color = srgba_to_color(accent.base, 0.9);
+
+        // Outer indicator ring - use a darker shade of the background
+        let indicator_ring_color = srgba_to_color(bg.base, 1.0);
 
         Self {
             bg_color,
@@ -165,6 +171,7 @@ impl PieTheme {
             icon_bg_hover_color,
             text_color,
             running_indicator_color,
+            indicator_ring_color,
         }
     }
 }
@@ -666,7 +673,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
             let bg_color = theme.bg_color;
             let bg_outer = self.menu_radius + 10.0;
             let bg_inner = self.inner_radius;
-            let bg_num_rings: usize = 50;
+            let bg_num_rings: usize = 80;
             let bg_ring_width = (bg_outer - bg_inner) / bg_num_rings as f32;
 
             for i in 0..bg_num_rings {
@@ -693,9 +700,22 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                     &ring_path,
                     Stroke::default()
                         .with_color(ring_color)
-                        .with_width(bg_ring_width + 0.5),
+                        .with_width(bg_ring_width),
                 );
             }
+
+            // Draw ring for outer indicator area using theme color
+            let indicator_ring_inner = self.menu_radius + 4.0;
+            let indicator_ring_outer = self.menu_radius + 11.0;
+            let indicator_ring_width = indicator_ring_outer - indicator_ring_inner;
+            let indicator_ring_radius = (indicator_ring_inner + indicator_ring_outer) / 2.0;
+            let indicator_bg = Path::circle(center, indicator_ring_radius);
+            frame.stroke(
+                &indicator_bg,
+                Stroke::default()
+                    .with_color(theme.indicator_ring_color)
+                    .with_width(indicator_ring_width),
+            );
 
             // Draw each slice segment with fade at inner edge
             for slice in self.slices {
@@ -713,9 +733,9 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                 };
 
                 // Draw segment as concentric arc-strokes with fading alpha at inner edge
-                let num_rings = 40;
+                let num_rings = 60;
                 let ring_width = segment_depth / num_rings as f32;
-                let fade_rings = 16; // Number of rings that fade at inner edge
+                let fade_rings = 24; // Number of rings that fade at inner edge
 
                 for r in 0..num_rings {
                     let ring_radius = inner_radius + (r as f32 + 0.5) * ring_width;
@@ -751,7 +771,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                         &arc,
                         Stroke::default()
                             .with_color(ring_color)
-                            .with_width(ring_width + 0.5),
+                            .with_width(ring_width),
                     );
                 }
 
@@ -763,15 +783,6 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                     center.x + icon_radius * slice.angle.cos(),
                     center.y + icon_radius * slice.angle.sin(),
                 );
-
-                // Icon background circle
-                let icon_bg = Path::circle(icon_center, ICON_SIZE as f32 / 2.0 + 4.0);
-                let icon_bg_color = if is_hovered {
-                    theme.icon_bg_hover_color
-                } else {
-                    theme.icon_bg_color
-                };
-                frame.fill(&icon_bg, icon_bg_color);
 
                 // Draw the icon or fallback to letter
                 let icon_size = ICON_SIZE as f32;
