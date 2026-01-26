@@ -1,17 +1,31 @@
 //! Touchpad gesture detection module
 //!
-//! Detects multi-finger press/release on touchpads using Linux evdev and triggers
-//! the pie menu. Requires user to be in the 'input' group.
+//! Detects multi-finger tap and swipe gestures on touchpads using Linux evdev.
+//! Triggers the pie menu on tap, or executes configured actions on swipe.
 //!
-//! Supports configurable finger count (3 or 4), tap duration, and movement threshold.
+//! # Requirements
+//! - User must be in the 'input' group to access /dev/input devices
+//! - Touchpad must support BTN_TOOL_TRIPLETAP (3-finger) or BTN_TOOL_QUADTAP (4-finger)
+//!
+//! # Features
+//! - Configurable finger count (3 or 4 fingers)
+//! - Configurable tap duration and movement threshold
+//! - Swipe gesture detection with configurable actions per direction
+//! - Early swipe detection (triggers before finger lift when threshold exceeded)
+//! - Respects COSMIC workspace layout (ignores swipes used for workspace switching)
+//! - Multitouch tracking with per-finger movement averaging for accurate direction detection
 
 use evdev::{AbsoluteAxisType, Device, InputEventKind, Key};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
-use crate::config::{GestureConfig, PieMenuConfig, SharedConfig};
+use crate::config::{GestureConfig, PieMenuConfig, SharedConfig, SwipeAction, WorkspaceLayout, read_workspace_layout};
 use crate::tray::{GestureFeedback, TrayMessage};
+use std::process::Command;
+
+/// Maximum number of touch slots to track (most touchpads support up to 5-10)
+const MAX_SLOTS: usize = 10;
 
 /// Errors that can occur during gesture detection setup
 #[derive(Debug)]
@@ -43,20 +57,161 @@ impl std::fmt::Display for GestureError {
     }
 }
 
+/// Tracks position for a single touch slot
+#[derive(Debug, Clone, Copy, Default)]
+struct TouchSlot {
+    /// Whether this slot is currently active (finger touching)
+    active: bool,
+    /// Current X position
+    x: i32,
+    /// Current Y position
+    y: i32,
+    /// Starting X position (when finger first touched)
+    start_x: Option<i32>,
+    /// Starting Y position (when finger first touched)
+    start_y: Option<i32>,
+}
+
+/// Multitouch tracker - tracks all finger positions for accurate gesture detection.
+///
+/// Handles the Linux multitouch protocol where each finger is assigned a slot,
+/// and position events update the current slot. Tracks per-finger start positions
+/// to calculate movement deltas for swipe direction detection.
+#[derive(Debug, Clone)]
+struct MultiTouchTracker {
+    /// Current slot being updated (set by ABS_MT_SLOT events)
+    current_slot: usize,
+    /// Per-slot position data for up to MAX_SLOTS fingers
+    slots: [TouchSlot; MAX_SLOTS],
+    /// Whether we've captured enough start positions to begin tracking movement
+    start_captured: bool,
+    /// Time when first position event was seen (for settling time)
+    first_event_time: Option<Instant>,
+    /// Minimum fingers required before capturing start positions
+    min_fingers_for_start: usize,
+}
+
+impl MultiTouchTracker {
+    /// Create a new tracker requiring `min_fingers` before capturing start positions.
+    fn new(min_fingers: usize) -> Self {
+        Self {
+            current_slot: 0,
+            slots: [TouchSlot::default(); MAX_SLOTS],
+            start_captured: false,
+            first_event_time: None,
+            min_fingers_for_start: min_fingers,
+        }
+    }
+}
+
+impl Default for MultiTouchTracker {
+    fn default() -> Self {
+        Self::new(3) // Default to requiring 3 fingers before capturing start
+    }
+}
+
+impl MultiTouchTracker {
+    /// Record that we received a position event (for settling time tracking).
+    /// Called on each position update to track when gesture started.
+    fn mark_event(&mut self) {
+        if self.first_event_time.is_none() {
+            self.first_event_time = Some(Instant::now());
+        }
+    }
+
+    /// Attempt to mark that we have enough finger start positions captured.
+    ///
+    /// Waits until either:
+    /// - We have `min_fingers_for_start` fingers with valid positions, OR
+    /// - 50ms has passed with at least 1 finger (settling time fallback)
+    ///
+    /// This prevents capturing start positions too early when not all fingers
+    /// have been registered yet.
+    fn try_capture_start(&mut self) {
+        if self.start_captured {
+            return;
+        }
+
+        let fingers_ready = self.fingers_with_start();
+        let settling_time = self.first_event_time
+            .map(|t| t.elapsed())
+            .unwrap_or(Duration::ZERO);
+
+        let should_capture = fingers_ready >= self.min_fingers_for_start
+            || (fingers_ready > 0 && settling_time >= Duration::from_millis(50));
+
+        if should_capture {
+            println!(
+                "Start captured: {} fingers with positions after {:?}",
+                fingers_ready, settling_time
+            );
+            self.start_captured = true;
+        }
+    }
+
+    /// Get count of fingers with valid start positions (both X and Y captured).
+    fn fingers_with_start(&self) -> usize {
+        self.slots.iter()
+            .filter(|s| s.active && s.start_x.is_some() && s.start_y.is_some())
+            .count()
+    }
+
+    /// Calculate average movement delta across all tracked fingers.
+    ///
+    /// This averages the (current - start) movement for each finger individually,
+    /// which is more accurate than comparing centroids when fingers may be in
+    /// different slots or have different starting positions.
+    ///
+    /// Returns (avg_dx, avg_dy) where positive X is right, positive Y is down.
+    fn average_movement(&self) -> (i32, i32) {
+        let mut total_dx: i64 = 0;
+        let mut total_dy: i64 = 0;
+        let mut count = 0;
+
+        for slot in &self.slots {
+            if slot.active {
+                if let (Some(sx), Some(sy)) = (slot.start_x, slot.start_y) {
+                    total_dx += (slot.x - sx) as i64;
+                    total_dy += (slot.y - sy) as i64;
+                    count += 1;
+                }
+            }
+        }
+
+        if count == 0 {
+            return (0, 0);
+        }
+
+        ((total_dx / count) as i32, (total_dy / count) as i32)
+    }
+
+    /// Calculate maximum movement from any finger's start position.
+    /// Used to determine if gesture exceeds tap movement threshold.
+    fn max_movement_from_start(&self) -> i32 {
+        let mut max = 0;
+        for slot in &self.slots {
+            if slot.active {
+                if let (Some(sx), Some(sy)) = (slot.start_x, slot.start_y) {
+                    let dx = (slot.x - sx).abs();
+                    let dy = (slot.y - sy).abs();
+                    max = max.max(dx).max(dy);
+                }
+            }
+        }
+        max
+    }
+}
+
 /// State machine for tracking multi-finger gesture
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
 enum GestureState {
     /// Waiting for fingers down
     Idle,
     /// Fingers are down, tracking time and position
     FingersDown {
         start: Instant,
-        /// Starting X position on touchpad
-        start_x: Option<i32>,
-        /// Starting Y position on touchpad
-        start_y: Option<i32>,
-        /// Maximum distance moved from start
-        max_movement: i32,
+        /// Multitouch position tracker
+        tracker: MultiTouchTracker,
     },
     /// Tap detected, waiting to confirm it's not a 3→4 finger transition
     /// (only used in 3-finger mode)
@@ -64,6 +219,30 @@ enum GestureState {
         /// When the pending trigger was set
         pending_since: Instant,
     },
+}
+
+/// Calculate swipe direction from movement deltas
+fn calculate_swipe_direction_from_delta(dx: i32, dy: i32) -> SwipeDirection {
+    println!("Swipe calculation: dx={} dy={} (|dx|={} |dy|={})", dx, dy, dx.abs(), dy.abs());
+
+    // Determine dominant axis using absolute values
+    if dx.abs() > dy.abs() {
+        // Horizontal swipe
+        if dx > 0 {
+            SwipeDirection::Right
+        } else {
+            SwipeDirection::Left
+        }
+    } else {
+        // Vertical swipe
+        // Note: On most touchpads, Y increases downward (like screen coords)
+        // So positive dy = physical swipe down, negative dy = physical swipe up
+        if dy > 0 {
+            SwipeDirection::Down
+        } else {
+            SwipeDirection::Up
+        }
+    }
 }
 
 /// Find all touchpad device paths in /dev/input/ that support the given finger count
@@ -135,26 +314,50 @@ fn is_touchpad_with_finger_support(device: &Device, finger_count: u8) -> bool {
 /// Debounce time for 3-finger mode to avoid false triggers on 3→4 transitions
 const PENDING_TRIGGER_DEBOUNCE: Duration = Duration::from_millis(150);
 
-/// Events returned from process_event
+/// Direction of a swipe gesture (relative to touchpad orientation)
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum GestureEvent {
-    None,
-    FingersDown,
-    FingersUp,
-    /// Trigger was cancelled (3→4 finger transition detected)
-    TriggerCancelled,
-    /// Swipe detected (too much movement or duration) - reset icon
-    SwipeDetected,
+pub enum SwipeDirection {
+    /// Swipe toward top of touchpad (decreasing Y)
+    Up,
+    /// Swipe toward bottom of touchpad (increasing Y)
+    Down,
+    /// Swipe toward left of touchpad (decreasing X)
+    Left,
+    /// Swipe toward right of touchpad (increasing X)
+    Right,
 }
 
-/// Process a single input event, returning gesture events
-/// Uses the provided config for tap detection parameters
+/// Events returned from gesture event processing
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum GestureEvent {
+    /// No significant event
+    None,
+    /// Required number of fingers touched down
+    FingersDown,
+    /// Fingers lifted after a quick tap (triggers pie menu)
+    FingersUp,
+    /// Gesture cancelled (e.g., 3→4 finger transition detected in 3-finger mode)
+    TriggerCancelled,
+    /// Swipe detected - triggered immediately when movement exceeds threshold
+    SwipeDetected(SwipeDirection),
+}
+
+/// Process a single evdev input event and update gesture state.
+///
+/// Handles key events (finger down/up) and absolute axis events (position tracking).
+/// Returns a `GestureEvent` indicating what happened:
+/// - `FingersDown`: Required fingers touched down, start tracking
+/// - `FingersUp`: Quick tap detected (short duration, little movement)
+/// - `SwipeDetected`: Movement exceeded threshold, swipe direction determined
+/// - `TriggerCancelled`: Gesture was cancelled (e.g., extra finger added)
+/// - `None`: No significant state change
 fn process_event(
     event: &evdev::InputEvent,
     state: &mut GestureState,
     finger_count: u8,
     tap_max_duration: Duration,
     tap_max_movement: i32,
+    swipe_threshold: i32,
 ) -> GestureEvent {
     // Determine which key to watch based on finger count
     let tap_key = if finger_count == 3 {
@@ -173,18 +376,19 @@ fn process_event(
     match event.kind() {
         InputEventKind::Key(key) if key == tap_key => {
             if event.value() == 1 {
-                // Fingers went down - record the time, will capture position on first touch event
+                // Fingers went down - record the time and start fresh tracker
+                // Require at least (finger_count - 1) fingers before capturing start position
+                let min_fingers = (finger_count as usize).saturating_sub(1).max(2);
                 *state = GestureState::FingersDown {
                     start: Instant::now(),
-                    start_x: None,
-                    start_y: None,
-                    max_movement: 0,
+                    tracker: MultiTouchTracker::new(min_fingers),
                 };
                 return GestureEvent::FingersDown;
             } else if event.value() == 0 {
                 // Fingers lifted - check if it was a quick tap (not a swipe)
-                if let GestureState::FingersDown { start, max_movement, .. } = *state {
+                if let GestureState::FingersDown { start, ref tracker } = state.clone() {
                     let duration = start.elapsed();
+                    let max_movement = tracker.max_movement_from_start();
 
                     if duration <= tap_max_duration && max_movement <= tap_max_movement {
                         // Quick tap with little movement
@@ -201,13 +405,20 @@ fn process_event(
                             return GestureEvent::FingersUp;
                         }
                     } else {
-                        // Swipe gesture - ignore and reset icon
-                        *state = GestureState::Idle;
+                        // Swipe gesture - determine direction using average finger movement
+                        let (avg_dx, avg_dy) = tracker.average_movement();
                         println!(
-                            "Gesture ignored (duration: {:?}, movement: {}) - likely a swipe",
-                            duration, max_movement
+                            "End state: {} fingers tracked, avg movement: dx={} dy={}",
+                            tracker.fingers_with_start(),
+                            avg_dx, avg_dy
                         );
-                        return GestureEvent::SwipeDetected;
+                        let direction = calculate_swipe_direction_from_delta(avg_dx, avg_dy);
+                        println!(
+                            "Swipe detected: {:?} (duration: {:?}, movement: {})",
+                            direction, duration, max_movement
+                        );
+                        *state = GestureState::Idle;
+                        return GestureEvent::SwipeDetected(direction);
                     }
                 }
             }
@@ -222,30 +433,101 @@ fn process_event(
                 return GestureEvent::TriggerCancelled;
             }
         }
-        // Track absolute finger position while fingers are down
+        // Track multitouch position while fingers are down
         InputEventKind::AbsAxis(axis) => {
-            if let GestureState::FingersDown { start_x, start_y, max_movement, .. } = state {
+            if let GestureState::FingersDown { ref mut tracker, .. } = state {
                 let val = event.value();
                 match axis {
-                    // Track multitouch position (primary finger)
-                    AbsoluteAxisType::ABS_MT_POSITION_X | AbsoluteAxisType::ABS_X => {
-                        if let Some(sx) = *start_x {
-                            let dist = (val - sx).abs();
-                            if dist > *max_movement {
-                                *max_movement = dist;
-                            }
-                        } else {
-                            *start_x = Some(val);
+                    // ABS_MT_SLOT tells us which finger slot the following events apply to
+                    AbsoluteAxisType::ABS_MT_SLOT => {
+                        let slot = val as usize;
+                        if slot < MAX_SLOTS {
+                            tracker.current_slot = slot;
                         }
                     }
-                    AbsoluteAxisType::ABS_MT_POSITION_Y | AbsoluteAxisType::ABS_Y => {
-                        if let Some(sy) = *start_y {
-                            let dist = (val - sy).abs();
-                            if dist > *max_movement {
-                                *max_movement = dist;
+                    // ABS_MT_TRACKING_ID: >= 0 means finger down, -1 means finger up
+                    AbsoluteAxisType::ABS_MT_TRACKING_ID => {
+                        let slot = tracker.current_slot;
+                        if slot < MAX_SLOTS {
+                            tracker.slots[slot].active = val >= 0;
+                        }
+                    }
+                    // Track X position for current slot
+                    AbsoluteAxisType::ABS_MT_POSITION_X => {
+                        let slot = tracker.current_slot;
+                        if slot < MAX_SLOTS {
+                            // Capture start position on first X event for this slot
+                            if tracker.slots[slot].start_x.is_none() {
+                                tracker.slots[slot].start_x = Some(val);
                             }
-                        } else {
-                            *start_y = Some(val);
+                            tracker.slots[slot].x = val;
+                            tracker.slots[slot].active = true;
+                            tracker.mark_event();
+                            tracker.try_capture_start();
+
+                            // Check for early swipe detection
+                            if tracker.start_captured {
+                                if let Some(dir) = check_early_swipe(tracker, swipe_threshold) {
+                                    *state = GestureState::Idle;
+                                    return GestureEvent::SwipeDetected(dir);
+                                }
+                            }
+                        }
+                    }
+                    // Track Y position for current slot
+                    AbsoluteAxisType::ABS_MT_POSITION_Y => {
+                        let slot = tracker.current_slot;
+                        if slot < MAX_SLOTS {
+                            // Capture start position on first Y event for this slot
+                            if tracker.slots[slot].start_y.is_none() {
+                                tracker.slots[slot].start_y = Some(val);
+                            }
+                            tracker.slots[slot].y = val;
+                            tracker.slots[slot].active = true;
+                            tracker.mark_event();
+                            tracker.try_capture_start();
+
+                            // Check for early swipe detection
+                            if tracker.start_captured {
+                                if let Some(dir) = check_early_swipe(tracker, swipe_threshold) {
+                                    *state = GestureState::Idle;
+                                    return GestureEvent::SwipeDetected(dir);
+                                }
+                            }
+                        }
+                    }
+                    // Fallback for non-MT touchpads (single-touch style reporting)
+                    AbsoluteAxisType::ABS_X => {
+                        // Use slot 0 for legacy single-touch
+                        if tracker.slots[0].start_x.is_none() {
+                            tracker.slots[0].start_x = Some(val);
+                        }
+                        tracker.slots[0].x = val;
+                        tracker.slots[0].active = true;
+                        tracker.mark_event();
+                        tracker.try_capture_start();
+
+                        if tracker.start_captured {
+                            if let Some(dir) = check_early_swipe(tracker, swipe_threshold) {
+                                *state = GestureState::Idle;
+                                return GestureEvent::SwipeDetected(dir);
+                            }
+                        }
+                    }
+                    AbsoluteAxisType::ABS_Y => {
+                        if tracker.slots[0].start_y.is_none() {
+                            tracker.slots[0].start_y = Some(val);
+                        }
+                        tracker.slots[0].y = val;
+                        tracker.slots[0].active = true;
+                        tracker.mark_event();
+                        tracker.try_capture_start();
+
+                        if tracker.start_captured {
+                            if let Some(dir) = check_early_swipe(tracker, swipe_threshold) {
+                                *state = GestureState::Idle;
+                                return GestureEvent::SwipeDetected(dir);
+                            }
                         }
                     }
                     _ => {}
@@ -257,9 +539,28 @@ fn process_event(
     GestureEvent::None
 }
 
+/// Check if finger movement exceeds threshold for early swipe detection.
+///
+/// Called on each position update to detect swipes before finger lift.
+/// This makes swipe gestures feel more responsive.
+fn check_early_swipe(tracker: &MultiTouchTracker, threshold: i32) -> Option<SwipeDirection> {
+    let (avg_dx, avg_dy) = tracker.average_movement();
+    let movement = avg_dx.abs().max(avg_dy.abs());
+
+    if movement >= threshold {
+        println!(
+            "Early swipe detected: {} fingers, avg movement: dx={} dy={}, threshold={}",
+            tracker.fingers_with_start(), avg_dx, avg_dy, threshold
+        );
+        Some(calculate_swipe_direction_from_delta(avg_dx, avg_dy))
+    } else {
+        None
+    }
+}
+
 /// Check if a pending trigger has timed out and should fire
 fn check_pending_trigger(state: &mut GestureState) -> bool {
-    if let GestureState::PendingTrigger { pending_since } = *state {
+    if let GestureState::PendingTrigger { pending_since } = state {
         if pending_since.elapsed() >= PENDING_TRIGGER_DEBOUNCE {
             *state = GestureState::Idle;
             return true;
@@ -326,21 +627,25 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
         // Periodically reload config from disk (for settings changes from subprocess)
         if last_config_check.elapsed() > config_check_interval {
             let new_cfg = GestureConfig::from(&PieMenuConfig::load());
-            if new_cfg.finger_count != current_cfg.finger_count
+            // Always update config to pick up swipe action changes
+            let config_changed = new_cfg.finger_count != current_cfg.finger_count
                 || new_cfg.tap_max_duration != current_cfg.tap_max_duration
-                || new_cfg.tap_max_movement != current_cfg.tap_max_movement
-            {
+                || new_cfg.tap_max_movement != current_cfg.tap_max_movement;
+
+            if config_changed {
                 println!(
                     "Config changed: {} fingers, {}ms duration, {} movement",
                     new_cfg.finger_count,
                     new_cfg.tap_max_duration.as_millis(),
                     new_cfg.tap_max_movement
                 );
-                current_cfg = new_cfg;
-                // Update shared config
-                if let Ok(mut shared) = config.write() {
-                    *shared = current_cfg.clone();
-                }
+            }
+
+            // Always update to get latest swipe actions
+            current_cfg = new_cfg;
+            // Update shared config
+            if let Ok(mut shared) = config.write() {
+                *shared = current_cfg.clone();
             }
             last_config_check = Instant::now();
         }
@@ -405,6 +710,7 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
                             cfg.finger_count,
                             cfg.tap_max_duration,
                             cfg.tap_max_movement,
+                            cfg.swipe_threshold,
                         ) {
                             GestureEvent::FingersDown => {
                                 println!("{} fingers down - icon highlighted", cfg.finger_count);
@@ -422,9 +728,96 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
                                     return;
                                 }
                             }
-                            GestureEvent::TriggerCancelled | GestureEvent::SwipeDetected => {
-                                // Gesture cancelled or swipe detected, reset icon
+                            GestureEvent::TriggerCancelled => {
+                                // Gesture cancelled, reset icon
                                 feedback.reset();
+                            }
+                            GestureEvent::SwipeDetected(direction) => {
+                                // Reset icon first
+                                feedback.reset();
+
+                                // Check workspace layout - only allow actions for available directions
+                                let layout = read_workspace_layout();
+                                let direction_allowed = match layout {
+                                    // Horizontal workspaces: left/right used by system, up/down available
+                                    WorkspaceLayout::Horizontal => matches!(direction, SwipeDirection::Up | SwipeDirection::Down),
+                                    // Vertical workspaces: up/down used by system, left/right available
+                                    WorkspaceLayout::Vertical => matches!(direction, SwipeDirection::Left | SwipeDirection::Right),
+                                };
+
+                                if !direction_allowed {
+                                    println!(
+                                        "Swipe {:?} ignored - direction used by system for {:?} workspace switching",
+                                        direction, layout
+                                    );
+                                    continue;
+                                }
+
+                                // Debug: show current swipe config
+                                println!(
+                                    "Current swipe config: up={:?} down={:?} left={:?} right={:?}",
+                                    cfg.swipe_up, cfg.swipe_down, cfg.swipe_left, cfg.swipe_right
+                                );
+
+                                // Get the action for this swipe direction
+                                let action = match direction {
+                                    SwipeDirection::Up => cfg.swipe_up,
+                                    SwipeDirection::Down => cfg.swipe_down,
+                                    SwipeDirection::Left => cfg.swipe_left,
+                                    SwipeDirection::Right => cfg.swipe_right,
+                                };
+                                println!("Action for {:?}: {:?}", direction, action);
+
+                                // Execute the action
+                                match action {
+                                    SwipeAction::None => {
+                                        // Let system handle it (do nothing)
+                                    }
+                                    SwipeAction::PieMenu => {
+                                        // Open pie menu
+                                        println!("Swipe {:?} - launching pie menu", direction);
+                                        if tx.send(TrayMessage::ShowPieMenu { x: 0, y: 0 }).is_err() {
+                                            return;
+                                        }
+                                    }
+                                    _ => {
+                                        // Execute the command
+                                        if let Some(cmd) = action.command() {
+                                            println!("Swipe {:?} - launching {}", direction, cmd);
+                                            // Get display env vars for GUI commands
+                                            let wayland = std::env::var("WAYLAND_DISPLAY").unwrap_or_default();
+                                            let xdg_runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
+                                            println!("Environment: WAYLAND_DISPLAY={} XDG_RUNTIME_DIR={}", wayland, xdg_runtime);
+
+                                            match Command::new(cmd)
+                                                .env("WAYLAND_DISPLAY", &wayland)
+                                                .env("XDG_RUNTIME_DIR", &xdg_runtime)
+                                                .spawn()
+                                            {
+                                                Ok(child) => {
+                                                    println!("Successfully spawned {} (pid {})", cmd, child.id());
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("Failed to spawn {}: {}", cmd, e);
+                                                    // Try with full path if simple command failed
+                                                    let full_path = format!("/usr/bin/{}", cmd);
+                                                    match Command::new(&full_path)
+                                                        .env("WAYLAND_DISPLAY", &wayland)
+                                                        .env("XDG_RUNTIME_DIR", &xdg_runtime)
+                                                        .spawn()
+                                                    {
+                                                        Ok(child) => {
+                                                            println!("Successfully spawned {} (pid {})", full_path, child.id());
+                                                        }
+                                                        Err(e2) => {
+                                                            eprintln!("Failed to spawn {}: {}", full_path, e2);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             GestureEvent::None => {}
                         }

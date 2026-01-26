@@ -1,13 +1,20 @@
 //! Settings application for cosmic-pie-menu
 //!
-//! A libcosmic-based settings window for configuring gesture detection.
+//! A libcosmic-based settings window for configuring gesture detection and swipe actions.
+//!
+//! # Features
+//! - Configure finger count (3 or 4 fingers)
+//! - Adjust tap duration and movement thresholds
+//! - Set swipe actions for available directions
+//! - Respects COSMIC workspace layout (only shows available swipe directions)
+//! - Changes are saved automatically
 
 use cosmic::app::Core;
 use cosmic::iced::Length;
 use cosmic::widget::{self, settings, text, dropdown};
 use cosmic::{Action, Application, Element, Task};
 
-use crate::config::PieMenuConfig;
+use crate::config::{PieMenuConfig, SwipeAction, WorkspaceLayout, read_workspace_layout};
 
 /// Application ID
 pub const APP_ID: &str = "io.github.reality2_roycdavies.cosmic-pie-menu.settings";
@@ -21,6 +28,16 @@ pub enum Message {
     TapDurationChanged(f32),
     /// Movement threshold slider changed
     MovementThresholdChanged(f32),
+    /// Swipe threshold slider changed
+    SwipeThresholdChanged(f32),
+    /// Swipe up action changed
+    SwipeUpChanged(usize),
+    /// Swipe down action changed
+    SwipeDownChanged(usize),
+    /// Swipe left action changed
+    SwipeLeftChanged(usize),
+    /// Swipe right action changed
+    SwipeRightChanged(usize),
     /// Reset to defaults
     ResetDefaults,
 }
@@ -28,12 +45,44 @@ pub enum Message {
 /// Finger count options for dropdown
 const FINGER_OPTIONS: &[&str] = &["3 fingers", "4 fingers"];
 
+/// Swipe action options for dropdown (static)
+const SWIPE_ACTION_OPTIONS: &[&str] = &[
+    "None (system default)",
+    "App Library",
+    "Launcher",
+    "Workspaces",
+    "Pie Menu",
+];
+
+/// Convert SwipeAction to dropdown index
+fn swipe_action_to_index(action: SwipeAction) -> usize {
+    SwipeAction::all()
+        .iter()
+        .position(|&a| a == action)
+        .unwrap_or(0)
+}
+
+/// Convert dropdown index to SwipeAction
+fn index_to_swipe_action(index: usize) -> SwipeAction {
+    SwipeAction::all()
+        .get(index)
+        .copied()
+        .unwrap_or_default()
+}
+
 /// Settings application state
 pub struct SettingsApp {
     core: Core,
     config: PieMenuConfig,
     /// Selected finger count index (0 = 3 fingers, 1 = 4 fingers)
     finger_index: usize,
+    /// Swipe action indexes
+    swipe_up_index: usize,
+    swipe_down_index: usize,
+    swipe_left_index: usize,
+    swipe_right_index: usize,
+    /// Current workspace layout (determines which swipe directions are available)
+    workspace_layout: WorkspaceLayout,
 }
 
 impl Application for SettingsApp {
@@ -66,12 +115,18 @@ impl Application for SettingsApp {
     fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Action<Self::Message>>) {
         let config = PieMenuConfig::load();
         let finger_index = if config.finger_count == 3 { 0 } else { 1 };
+        let workspace_layout = read_workspace_layout();
 
         (
             Self {
                 core,
-                config,
                 finger_index,
+                swipe_up_index: swipe_action_to_index(config.swipe_up),
+                swipe_down_index: swipe_action_to_index(config.swipe_down),
+                swipe_left_index: swipe_action_to_index(config.swipe_left),
+                swipe_right_index: swipe_action_to_index(config.swipe_right),
+                config,
+                workspace_layout,
             },
             Task::none(),
         )
@@ -92,9 +147,37 @@ impl Application for SettingsApp {
                 self.config.tap_movement = value as i32;
                 let _ = self.config.save();
             }
+            Message::SwipeThresholdChanged(value) => {
+                self.config.swipe_threshold = value as i32;
+                let _ = self.config.save();
+            }
+            Message::SwipeUpChanged(index) => {
+                self.swipe_up_index = index;
+                self.config.swipe_up = index_to_swipe_action(index);
+                let _ = self.config.save();
+            }
+            Message::SwipeDownChanged(index) => {
+                self.swipe_down_index = index;
+                self.config.swipe_down = index_to_swipe_action(index);
+                let _ = self.config.save();
+            }
+            Message::SwipeLeftChanged(index) => {
+                self.swipe_left_index = index;
+                self.config.swipe_left = index_to_swipe_action(index);
+                let _ = self.config.save();
+            }
+            Message::SwipeRightChanged(index) => {
+                self.swipe_right_index = index;
+                self.config.swipe_right = index_to_swipe_action(index);
+                let _ = self.config.save();
+            }
             Message::ResetDefaults => {
                 self.config = PieMenuConfig::default();
                 self.finger_index = if self.config.finger_count == 3 { 0 } else { 1 };
+                self.swipe_up_index = swipe_action_to_index(self.config.swipe_up);
+                self.swipe_down_index = swipe_action_to_index(self.config.swipe_down);
+                self.swipe_left_index = swipe_action_to_index(self.config.swipe_left);
+                self.swipe_right_index = swipe_action_to_index(self.config.swipe_right);
                 let _ = self.config.save();
             }
         }
@@ -156,6 +239,93 @@ impl Application for SettingsApp {
                 )
             );
 
+        // Swipe actions section - only show directions not used by workspace switching
+        // Horizontal workspaces: left/right switch workspaces, so up/down are available
+        // Vertical workspaces: up/down switch workspaces, so left/right are available
+        let (layout_name, available_directions) = match self.workspace_layout {
+            WorkspaceLayout::Horizontal => ("horizontal", "up/down"),
+            WorkspaceLayout::Vertical => ("vertical", "left/right"),
+        };
+
+        let mut swipe_section = settings::section()
+            .title("Swipe Actions");
+
+        // Add available swipe directions based on workspace layout
+        match self.workspace_layout {
+            WorkspaceLayout::Horizontal => {
+                // Horizontal workspaces use left/right for switching, so up/down are available
+                swipe_section = swipe_section
+                    .add(
+                        settings::item(
+                            "Swipe Up",
+                            dropdown(
+                                SWIPE_ACTION_OPTIONS,
+                                Some(self.swipe_up_index),
+                                Message::SwipeUpChanged,
+                            )
+                            .width(Length::Fixed(200.0)),
+                        )
+                    )
+                    .add(
+                        settings::item(
+                            "Swipe Down",
+                            dropdown(
+                                SWIPE_ACTION_OPTIONS,
+                                Some(self.swipe_down_index),
+                                Message::SwipeDownChanged,
+                            )
+                            .width(Length::Fixed(200.0)),
+                        )
+                    );
+            }
+            WorkspaceLayout::Vertical => {
+                // Vertical workspaces use up/down for switching, so left/right are available
+                swipe_section = swipe_section
+                    .add(
+                        settings::item(
+                            "Swipe Left",
+                            dropdown(
+                                SWIPE_ACTION_OPTIONS,
+                                Some(self.swipe_left_index),
+                                Message::SwipeLeftChanged,
+                            )
+                            .width(Length::Fixed(200.0)),
+                        )
+                    )
+                    .add(
+                        settings::item(
+                            "Swipe Right",
+                            dropdown(
+                                SWIPE_ACTION_OPTIONS,
+                                Some(self.swipe_right_index),
+                                Message::SwipeRightChanged,
+                            )
+                            .width(Length::Fixed(200.0)),
+                        )
+                    );
+            }
+        }
+
+        // Add swipe threshold slider to the section
+        swipe_section = swipe_section.add(
+            settings::flex_item(
+                "Swipe Threshold",
+                widget::row()
+                    .spacing(8)
+                    .align_y(cosmic::iced::Alignment::Center)
+                    .push(text::body(format!("{} units", self.config.swipe_threshold)))
+                    .push(
+                        widget::slider(
+                            100.0..=600.0,
+                            self.config.swipe_threshold as f32,
+                            Message::SwipeThresholdChanged,
+                        )
+                        .step(25.0)
+                        .width(Length::Fill)
+                    ),
+            )
+        );
+
         // Reset button
         let reset_button = widget::button::standard("Reset to Defaults")
             .on_press(Message::ResetDefaults);
@@ -165,6 +335,11 @@ impl Application for SettingsApp {
             page_title.into(),
             text::caption("Configure how the touchpad gesture triggers the pie menu. Lower duration requires quicker taps. Higher movement threshold allows more finger movement during the tap. Changes are saved automatically.").into(),
             gesture_section.into(),
+            text::caption(format!(
+                "Your workspace layout is {}. Swipe {} to configure custom actions. Other directions are used for workspace switching.",
+                layout_name, available_directions
+            )).into(),
+            swipe_section.into(),
             widget::container(reset_button)
                 .padding([16, 0, 0, 0])
                 .into(),
@@ -185,7 +360,7 @@ impl Application for SettingsApp {
 /// Run the settings application
 pub fn run_settings(_shared_config: Option<crate::config::SharedConfig>) {
     let settings = cosmic::app::Settings::default()
-        .size(cosmic::iced::Size::new(850.0, 480.0));
+        .size(cosmic::iced::Size::new(850.0, 700.0));
 
     let _ = cosmic::app::run::<SettingsApp>(settings, ());
 }

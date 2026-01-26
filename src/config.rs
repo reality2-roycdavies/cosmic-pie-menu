@@ -1,13 +1,68 @@
 //! Configuration module for cosmic-pie-menu
 //!
-//! Reads the COSMIC dock favorites and applets from the system config.
-//! Also manages pie menu settings (gesture config).
+//! Handles all configuration for the pie menu:
+//! - Gesture detection settings (finger count, tap duration, movement thresholds)
+//! - Swipe action mappings (what to do on swipe up/down/left/right)
+//! - Reading COSMIC dock favorites and applets for the pie menu
+//! - Reading COSMIC workspace layout to determine available swipe directions
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+
+/// Action to perform on a swipe gesture
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SwipeAction {
+    /// Do nothing (let system handle it)
+    #[default]
+    None,
+    /// Open the app library
+    AppLibrary,
+    /// Open the launcher
+    Launcher,
+    /// Open workspaces overview
+    Workspaces,
+    /// Open the pie menu
+    PieMenu,
+}
+
+impl SwipeAction {
+    /// Get the command to execute for this action
+    pub fn command(&self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::AppLibrary => Some("cosmic-app-library"),
+            Self::Launcher => Some("cosmic-launcher"),
+            Self::Workspaces => Some("cosmic-workspaces"),
+            Self::PieMenu => None, // Handled specially
+        }
+    }
+
+    /// All available actions for UI display
+    pub fn all() -> &'static [SwipeAction] {
+        &[
+            Self::None,
+            Self::AppLibrary,
+            Self::Launcher,
+            Self::Workspaces,
+            Self::PieMenu,
+        ]
+    }
+
+    /// Display name for the action (for UI display)
+    #[allow(dead_code)]
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::None => "None (system default)",
+            Self::AppLibrary => "App Library",
+            Self::Launcher => "Launcher",
+            Self::Workspaces => "Workspaces",
+            Self::PieMenu => "Pie Menu",
+        }
+    }
+}
 
 /// Configuration for pie menu gesture detection
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +73,25 @@ pub struct PieMenuConfig {
     pub tap_duration_ms: u64,
     /// Maximum movement threshold in touchpad units
     pub tap_movement: i32,
+    /// Swipe activation threshold in touchpad units
+    #[serde(default = "default_swipe_threshold")]
+    pub swipe_threshold: i32,
+    /// Action for swipe up
+    #[serde(default)]
+    pub swipe_up: SwipeAction,
+    /// Action for swipe down
+    #[serde(default)]
+    pub swipe_down: SwipeAction,
+    /// Action for swipe left
+    #[serde(default)]
+    pub swipe_left: SwipeAction,
+    /// Action for swipe right
+    #[serde(default)]
+    pub swipe_right: SwipeAction,
+}
+
+fn default_swipe_threshold() -> i32 {
+    300
 }
 
 impl Default for PieMenuConfig {
@@ -26,6 +100,11 @@ impl Default for PieMenuConfig {
             finger_count: 4,
             tap_duration_ms: 200,
             tap_movement: 500,
+            swipe_threshold: 300,
+            swipe_up: SwipeAction::Workspaces,
+            swipe_down: SwipeAction::AppLibrary,
+            swipe_left: SwipeAction::None,
+            swipe_right: SwipeAction::None,
         }
     }
 }
@@ -73,6 +152,16 @@ pub struct GestureConfig {
     pub tap_max_duration: Duration,
     /// Maximum movement threshold in touchpad units
     pub tap_max_movement: i32,
+    /// Swipe activation threshold in touchpad units
+    pub swipe_threshold: i32,
+    /// Action for swipe up
+    pub swipe_up: SwipeAction,
+    /// Action for swipe down
+    pub swipe_down: SwipeAction,
+    /// Action for swipe left
+    pub swipe_left: SwipeAction,
+    /// Action for swipe right
+    pub swipe_right: SwipeAction,
 }
 
 impl Default for GestureConfig {
@@ -87,12 +176,51 @@ impl From<&PieMenuConfig> for GestureConfig {
             finger_count: config.finger_count,
             tap_max_duration: Duration::from_millis(config.tap_duration_ms),
             tap_max_movement: config.tap_movement,
+            swipe_threshold: config.swipe_threshold,
+            swipe_up: config.swipe_up,
+            swipe_down: config.swipe_down,
+            swipe_left: config.swipe_left,
+            swipe_right: config.swipe_right,
         }
     }
 }
 
 /// Thread-safe shared gesture configuration
 pub type SharedConfig = Arc<RwLock<GestureConfig>>;
+
+/// Workspace layout orientation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WorkspaceLayout {
+    #[default]
+    Horizontal,
+    Vertical,
+}
+
+/// Get the path to COSMIC's workspace config
+fn workspace_config_path() -> Option<PathBuf> {
+    let config_dir = dirs::config_dir()?;
+    Some(config_dir.join("cosmic/com.system76.CosmicComp/v1/workspaces"))
+}
+
+/// Read the workspace layout from COSMIC config
+pub fn read_workspace_layout() -> WorkspaceLayout {
+    let path = match workspace_config_path() {
+        Some(p) => p,
+        None => return WorkspaceLayout::default(),
+    };
+
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return WorkspaceLayout::default(),
+    };
+
+    // Parse RON format - look for workspace_layout field
+    if content.contains("Vertical") {
+        WorkspaceLayout::Vertical
+    } else {
+        WorkspaceLayout::Horizontal
+    }
+}
 
 /// Get the path to COSMIC's app list favorites config
 fn favorites_path() -> Option<PathBuf> {
