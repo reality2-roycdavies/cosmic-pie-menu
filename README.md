@@ -153,12 +153,18 @@ The daemon provides:
 
 ### Gesture Workflow
 
+**Tap to Open Pie Menu:**
 1. **Multi-finger tap** on touchpad (3 or 4 fingers, configurable) - tray icon turns cyan
 2. **Move mouse** to where you want the menu
 3. **Lift fingers** or **single tap** - menu appears at cursor position
 4. **Press Escape** to cancel without showing menu
 
-The gesture detection distinguishes taps from swipes - a multi-finger swipe to change workspaces won't trigger the menu.
+**Swipe for Quick Actions:**
+1. **Multi-finger swipe** in a configured direction
+2. Action triggers immediately when movement threshold is exceeded (no need to lift fingers)
+3. Available directions depend on your workspace layout (see Settings)
+
+The gesture detection distinguishes taps from swipes based on movement. Swipes reserved by the system for workspace switching are ignored.
 
 ### Keyboard Shortcut
 
@@ -210,8 +216,19 @@ Right-click the system tray icon and select **Settings** to open the configurati
 | **Finger Count** | Number of fingers for tap gesture (3 or 4) | 4 |
 | **Tap Duration** | Maximum time for tap gesture in ms (100-500) | 200ms |
 | **Movement Threshold** | Maximum finger movement during tap in touchpad units (200-1000) | 500 |
+| **Swipe Up/Down/Left/Right** | Action to trigger on swipe gesture | Varies |
+| **Swipe Threshold** | Minimum movement to trigger swipe in touchpad units (100-600) | 300 |
 
-Lower tap duration values require quicker taps. Higher movement threshold allows more finger movement during the tap (useful if your taps aren't perfectly still).
+**Gesture Settings:**
+- Lower tap duration values require quicker taps
+- Higher movement threshold allows more finger movement during the tap (useful if your taps aren't perfectly still)
+
+**Swipe Actions:**
+- Swipes can be configured to open App Library, Launcher, Workspaces, Pie Menu, or pass through to the system
+- Available swipe directions depend on your COSMIC workspace layout:
+  - **Horizontal workspaces**: Up/Down swipes are configurable (Left/Right used by system for workspace switching)
+  - **Vertical workspaces**: Left/Right swipes are configurable (Up/Down used by system for workspace switching)
+- Swipes are detected early when movement threshold is exceeded (no need to lift fingers first)
 
 ### Dock Apps
 

@@ -891,6 +891,184 @@ cosmic-pie-menu pushed visual polish further than previous projects, requiring u
 
 ---
 
+## Theme 29: Per-Finger Tracking for Reliable Swipe Detection
+
+### Pattern
+
+Initial swipe direction detection was unreliable - swiping up often registered as left or right:
+
+| Approach | Result |
+|----------|--------|
+| Track single position | Positions overwritten as events arrive for different fingers |
+| Track centroid movement | Start position captured before all fingers registered |
+| Track per-finger deltas | Reliable direction detection |
+
+### Root Cause
+
+With 4-finger swipes, evdev sends position events for each finger using `ABS_MT_SLOT` to switch between them. Tracking only the "current" position meant finger 4's events overwrote finger 1's data.
+
+### Solution
+
+Track each finger's start and current position independently:
+
+```rust
+struct TouchSlot {
+    active: bool,
+    x: i32,
+    y: i32,
+    start_x: Option<i32>,
+    start_y: Option<i32>,
+}
+
+struct MultiTouchTracker {
+    current_slot: usize,
+    slots: [TouchSlot; MAX_SLOTS],
+    start_captured: bool,
+    first_event_time: Option<Instant>,
+}
+
+fn average_movement(&self) -> (i32, i32) {
+    // Sum (current - start) for each active finger
+    // Return average delta, not positions
+}
+```
+
+### Key Insight: Movement vs Position
+
+The centroid (average position) doesn't reveal direction when the gesture starts. What matters is *how much each finger moved from its starting position*.
+
+### Additional Refinement: Settling Time
+
+Start positions were captured too early, before all 4 fingers registered:
+
+```rust
+// Wait until enough fingers have positions OR 50ms has passed
+let enough_fingers = active_with_start >= self.min_fingers_for_start;
+let enough_time = elapsed >= Duration::from_millis(50);
+
+if !self.start_captured && (enough_fingers || enough_time) {
+    self.start_captured = true;
+    // NOW capture start positions for all active fingers
+}
+```
+
+### Implication
+
+Multi-finger gesture recognition requires tracking each finger independently. Aggregate metrics (centroid, average) should be computed from per-finger deltas, not shared position state.
+
+---
+
+## Theme 30: Early Gesture Detection
+
+### Pattern
+
+Waiting for finger lift before triggering swipes felt sluggish. Users expected actions to trigger as soon as movement was sufficient.
+
+### Solution
+
+Check movement threshold on every position update:
+
+```rust
+fn check_early_swipe(tracker: &MultiTouchTracker, threshold: i32) -> Option<SwipeDirection> {
+    let (avg_dx, avg_dy) = tracker.average_movement();
+    let movement = avg_dx.abs().max(avg_dy.abs());
+
+    if movement >= threshold {
+        Some(calculate_direction(avg_dx, avg_dy))
+    } else {
+        None
+    }
+}
+
+// In event processing loop:
+if let Some(direction) = check_early_swipe(&tracker, config.swipe_threshold) {
+    return GestureEvent::SwipeDetected(direction);
+}
+```
+
+### Analysis
+
+Traditional gesture detection waits for completion (finger lift). This works for taps where you need the full duration, but swipes have enough information mid-gesture.
+
+### Implication
+
+Gestures that convey intent through movement (not duration) can trigger early for better responsiveness.
+
+---
+
+## Theme 31: Workspace Layout Enforcement
+
+### Pattern
+
+Swipe actions conflicted with system behavior - user-configured left/right swipes triggered even when the system uses those directions for workspace switching.
+
+### Discovery
+
+COSMIC stores workspace layout in:
+```
+~/.config/cosmic/com.system76.CosmicComp/v1/workspaces
+```
+
+Parsing the RON format reveals `Horizontal` (left/right for workspaces) or `Vertical` (up/down for workspaces).
+
+### Solution
+
+Filter allowed swipe directions at two levels:
+
+**1. Settings UI** - Only show configurable directions:
+```rust
+match self.workspace_layout {
+    WorkspaceLayout::Horizontal => {
+        // Only show up/down swipe options
+    }
+    WorkspaceLayout::Vertical => {
+        // Only show left/right swipe options
+    }
+}
+```
+
+**2. Runtime enforcement** - Ignore swipes in reserved directions:
+```rust
+let direction_allowed = match layout {
+    WorkspaceLayout::Horizontal =>
+        matches!(direction, SwipeDirection::Up | SwipeDirection::Down),
+    WorkspaceLayout::Vertical =>
+        matches!(direction, SwipeDirection::Left | SwipeDirection::Right),
+};
+
+if !direction_allowed {
+    println!("Swipe {:?} ignored - direction used by system", direction);
+    continue;
+}
+```
+
+### Implication
+
+Desktop integration requires respecting system-level gesture reservations. Reading compositor configuration prevents conflicts with built-in behaviors.
+
+---
+
+## Comparative Analysis Across Three Projects (Final)
+
+| Aspect | cosmic-bing-wallpaper | cosmic-runcat | cosmic-pie-menu |
+|--------|----------------------|---------------|-----------------|
+| Primary UI | Settings window | Tray icon only | Canvas overlay + Settings |
+| Complexity | Medium | Medium | High |
+| Platform Discovery | Config paths, D-Bus | Animation timing | Wayland protocols, evdev, themes |
+| Iterations | ~5 major | ~4 major | ~30+ major |
+| Unique Challenge | Wallpaper setting API | CPU monitoring smoothing | Gesture detection, multitouch |
+| Wayland Depth | Surface | Minimal | Deep + bypassed for input |
+| Input Method | Click only | Click only | Click + tap + swipe gestures |
+| Theme Integration | Basic (dark/light) | Basic (dark/light) | Full (colors from palette) |
+| Visual Effects | None | Animation | Gradients, transparency, fades |
+| Gesture Complexity | None | None | Multi-finger tap/swipe discrimination |
+
+### Trend
+
+cosmic-pie-menu pushed input handling to its deepest level, requiring understanding of Linux evdev multitouch protocols, per-finger tracking, gesture state machines, and integration with compositor configuration.
+
+---
+
 ## Conclusions
 
 1. **Visual feedback is essential** - UI development requires seeing results, not just reading code
@@ -938,3 +1116,11 @@ cosmic-pie-menu pushed visual polish further than previous projects, requiring u
 22. **Visual debugging with markers** - Bright colors and removed elements isolate rendering issues
 
 23. **Understand the rendering stack** - Transparency effects depend on all layers below
+
+24. **Per-finger tracking for multitouch** - Aggregate metrics must be computed from individual finger deltas, not shared position state
+
+25. **Settling time for multitouch start positions** - Wait for all fingers to register before capturing gesture start
+
+26. **Early gesture detection improves responsiveness** - Movement-based gestures don't need to wait for completion
+
+27. **Respect system gesture reservations** - Read compositor configuration to avoid conflicts with built-in behaviors
