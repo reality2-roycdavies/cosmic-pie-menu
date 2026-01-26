@@ -32,6 +32,30 @@ fn is_dark_mode() -> bool {
     true
 }
 
+/// Get theme colors for the tray icon from COSMIC theme
+fn get_theme_colors() -> ((u8, u8, u8), (u8, u8, u8)) {
+    let theme = cosmic::theme::system_preference();
+    let cosmic = theme.cosmic();
+
+    // Normal icon color: use text/foreground color from background
+    let on_color = &cosmic.background.on;
+    let normal = (
+        (on_color.red * 255.0) as u8,
+        (on_color.green * 255.0) as u8,
+        (on_color.blue * 255.0) as u8,
+    );
+
+    // Triggered color: use accent color
+    let accent = &cosmic.accent.base;
+    let triggered = (
+        (accent.red * 255.0) as u8,
+        (accent.green * 255.0) as u8,
+        (accent.blue * 255.0) as u8,
+    );
+
+    (normal, triggered)
+}
+
 /// Messages that can be sent from the tray to the main application
 #[derive(Debug, Clone)]
 pub enum TrayMessage {
@@ -160,8 +184,8 @@ impl Tray for PieMenuTray {
 }
 
 /// Create a styled icon with dots in a circle + center dot (32x32 ARGB)
-/// Adapts to light/dark theme and shows highlight when gesture triggered
-fn create_pie_icon(dark_mode: bool, triggered: bool) -> Vec<Icon> {
+/// Adapts to COSMIC theme colors and shows highlight when gesture triggered
+fn create_pie_icon(_dark_mode: bool, triggered: bool) -> Vec<Icon> {
     let size = 32i32;
     let mut pixels = vec![0u8; (size * size * 4) as usize];
 
@@ -171,14 +195,12 @@ fn create_pie_icon(dark_mode: bool, triggered: bool) -> Vec<Icon> {
     let center_dot_radius = 4.0;
     let num_dots = 8;
 
-    // Theme-aware colors (light icon on dark bg, dark icon on light bg)
-    // When triggered, use a bright accent color (cyan/teal)
+    // Get colors from COSMIC theme
+    let (normal_color, triggered_color) = get_theme_colors();
     let (r, g, b) = if triggered {
-        (0u8, 200u8, 220u8) // Bright cyan for triggered state
-    } else if dark_mode {
-        (220u8, 220u8, 230u8) // Light gray-blue for dark mode
+        triggered_color
     } else {
-        (60u8, 60u8, 70u8) // Dark gray for light mode
+        normal_color
     };
 
     // Draw outer dots in a circle
