@@ -711,7 +711,7 @@ enum GestureState {
     },
 }
 
-const TAP_MAX_DURATION: Duration = Duration::from_millis(250);
+const TAP_MAX_DURATION: Duration = Duration::from_millis(200);
 const TAP_MAX_MOVEMENT: i32 = 500;  // Touchpad units
 
 fn process_event(event: &InputEvent, state: &mut GestureState) -> GestureEvent {

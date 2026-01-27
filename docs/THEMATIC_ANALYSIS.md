@@ -443,11 +443,11 @@ Distinguishing taps from swipes required multiple factors:
 
 | Factor | Tap | Swipe |
 |--------|-----|-------|
-| Duration | < 250ms | Usually longer |
+| Duration | < 200ms | Usually longer |
 | Movement | < 500 units | Significant |
 
 Either factor alone was insufficient:
-- Quick swipes could complete in < 250ms
+- Quick swipes could complete in < 200ms
 - "Unclean" taps could have small movements
 
 ### Analysis
@@ -494,7 +494,7 @@ Gesture thresholds evolved through user feedback:
 | v2 | 250ms | - | Still triggered on quick swipes |
 | v3 | 200ms | 100 (REL) | Wrong event type |
 | v4 | 200ms | 300 (ABS) | Too sensitive |
-| v5 | 250ms | 500 (ABS) | Working well |
+| v5 | 200ms | 500 (ABS) | Working well |
 
 ### Analysis
 
@@ -1050,7 +1050,7 @@ Desktop integration requires respecting system-level gesture reservations. Readi
 
 ## Comparative Analysis Across Three Projects (Final)
 
-| Aspect | cosmic-bing-wallpaper | cosmic-runcat | cosmic-pie-menu |
+| Aspect | cosmic-bing-wallpaper | cosmic-runkat | cosmic-pie-menu |
 |--------|----------------------|---------------|-----------------|
 | Primary UI | Settings window | Tray icon only | Canvas overlay + Settings |
 | Complexity | Medium | Medium | High |

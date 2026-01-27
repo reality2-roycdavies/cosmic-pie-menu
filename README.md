@@ -156,8 +156,8 @@ The daemon provides:
 **Tap to Open Pie Menu:**
 1. **Multi-finger tap** on touchpad (3 or 4 fingers, configurable) - tray icon turns cyan
 2. **Move mouse** to where you want the menu
-3. **Lift fingers** or **single tap** - menu appears at cursor position
-4. **Press Escape** to cancel without showing menu
+3. **Lift fingers** - menu appears at cursor position
+4. **Press Escape** once the menu appears to close it without selecting an app
 
 **Swipe for Quick Actions:**
 1. **Multi-finger swipe** in a configured direction
@@ -216,7 +216,9 @@ Right-click the system tray icon and select **Settings** to open the configurati
 | **Finger Count** | Number of fingers for tap gesture (3 or 4) | 4 |
 | **Tap Duration** | Maximum time for tap gesture in ms (100-500) | 200ms |
 | **Movement Threshold** | Maximum finger movement during tap in touchpad units (200-1000) | 500 |
-| **Swipe Up/Down/Left/Right** | Action to trigger on swipe gesture | Varies |
+| **Swipe Up** | Action to trigger on swipe up | Workspaces |
+| **Swipe Down** | Action to trigger on swipe down | App Library |
+| **Swipe Left/Right** | Action to trigger on swipe left/right | None |
 | **Swipe Threshold** | Minimum movement to trigger swipe in touchpad units (100-600) | 300 |
 
 **Gesture Settings:**
