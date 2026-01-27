@@ -207,12 +207,8 @@ fn is_dark_mode() -> bool {
 pub enum Message {
     /// An app was clicked
     LaunchApp(usize),
-    /// Mouse moved - update hover state
-    MouseMoved(Point),
     /// Close the menu
     Close,
-    /// Layer surface created
-    LayerReady,
     /// Key pressed
     KeyPressed(Key),
     /// Canvas event
@@ -237,9 +233,7 @@ struct AppSlice {
     angle: f32,           // Center angle of this slice
     start_angle: f32,     // Start of slice
     end_angle: f32,       // End of slice
-    icon_pos: Point,      // Position for icon center
     is_running: bool,     // Whether app is currently running
-    is_favorite: bool,    // Whether app is a dock favorite
 }
 
 /// State for the pie menu application
@@ -247,12 +241,9 @@ struct PieMenuApp {
     apps: Vec<AppInfo>,
     slices: Vec<AppSlice>,
     hovered_slice: Option<usize>,
-    center: Point,
     tick_count: u32,  // Count ticks to trigger redraws on scaled displays
     /// Position mode: None = centered window, Some = full-screen with menu at position
     cursor_position: Option<(f32, f32)>,
-    /// Whether we're in full-screen mode (for cursor-positioned menu)
-    full_screen: bool,
     /// Dynamic menu radius based on number of apps
     menu_radius: f32,
     /// Dynamic inner radius (scales with menu size)
@@ -260,16 +251,9 @@ struct PieMenuApp {
 }
 
 impl PieMenuApp {
-    fn new(apps: Vec<AppInfo>) -> (Self, Task<Message>) {
-        Self::new_at(apps, None)
-    }
-
     fn new_at(apps: Vec<AppInfo>, position: Option<(f32, f32)>) -> (Self, Task<Message>) {
         let menu_radius = calculate_menu_radius(apps.len());
         let inner_radius = calculate_inner_radius(menu_radius);
-        let _menu_size = (menu_radius * 2.0 + ICON_SIZE as f32 + 80.0) as f32;
-        // Always use full-screen mode for better layer surface compatibility
-        let full_screen = true;
 
         let mut settings = SctkLayerSurfaceSettings::default();
         settings.keyboard_interactivity = KeyboardInteractivity::OnDemand;
@@ -280,11 +264,7 @@ impl PieMenuApp {
         settings.size = Some((None, None)); // Fill available space
         settings.exclusive_zone = -1;
 
-        // Center will be calculated during draw based on surface size
-        // If position is provided, use that; otherwise center of screen
-        let center = Point::new(0.0, 0.0); // Placeholder, will be updated in draw
-
-        // Pre-calculate slice data (positions will be adjusted during draw if full-screen)
+        // Pre-calculate slice data (positions calculated during draw)
         let num_apps = apps.len();
         let slices: Vec<AppSlice> = apps
             .iter()
@@ -296,13 +276,6 @@ impl PieMenuApp {
                 let start_angle = angle - slice_angle / 2.0;
                 let end_angle = angle + slice_angle / 2.0;
 
-                // Calculate icon position using dynamic formula
-                let icon_radius = calculate_icon_radius(menu_radius, inner_radius, num_apps);
-                let icon_pos = Point::new(
-                    center.x + icon_radius * angle.cos(),
-                    center.y + icon_radius * angle.sin(),
-                );
-
                 let icon_path = app.icon.as_ref()
                     .and_then(|name| find_icon_path(name, ICON_SIZE));
 
@@ -313,9 +286,7 @@ impl PieMenuApp {
                     angle,
                     start_angle,
                     end_angle,
-                    icon_pos,
                     is_running: app.is_running,
-                    is_favorite: app.is_favorite,
                 }
             })
             .collect();
@@ -324,10 +295,8 @@ impl PieMenuApp {
             apps,
             slices,
             hovered_slice: None,
-            center,
             tick_count: 0,
             cursor_position: position,
-            full_screen,
             menu_radius,
             inner_radius,
         };
@@ -370,7 +339,7 @@ impl PieMenuApp {
                 Task::none()
             }
             Message::CanvasEvent(PieCanvasMessage::ClickSegment(index)) => {
-                return self.update(Message::LaunchApp(index));
+                self.update(Message::LaunchApp(index))
             }
             Message::CanvasEvent(PieCanvasMessage::RightClickSegment(index)) => {
                 if let Some(app) = self.apps.get(index) {
@@ -398,12 +367,7 @@ impl PieMenuApp {
                 Task::none()
             }
             Message::CanvasEvent(PieCanvasMessage::ClickCenter) => {
-                return self.update(Message::Close);
-            }
-            Message::MouseMoved(_) => Task::none(),
-            Message::LayerReady => {
-                println!("Layer surface ready");
-                Task::none()
+                self.update(Message::Close)
             }
             Message::KeyPressed(key) => {
                 if matches!(key, Key::Named(keyboard::key::Named::Escape)) {
@@ -432,8 +396,6 @@ impl PieMenuApp {
     }
 
     fn view(&self, _id: Id) -> Element<'_, Message> {
-        let menu_size = (self.menu_radius * 2.0 + ICON_SIZE as f32 + 80.0) as f32;
-
         // Get hovered app name for center display
         let hovered_name = self.hovered_slice
             .and_then(|i| self.slices.get(i))
@@ -444,18 +406,13 @@ impl PieMenuApp {
             slices: &self.slices,
             hovered: self.hovered_slice,
             cursor_position: self.cursor_position,
-            full_screen: self.full_screen,
             menu_radius: self.menu_radius,
             inner_radius: self.inner_radius,
             hovered_name,
         });
 
-        // In full-screen mode, fill the screen; otherwise fixed size
-        if self.full_screen {
-            pie_canvas.width(Length::Fill).height(Length::Fill).into()
-        } else {
-            pie_canvas.width(Length::Fixed(menu_size)).height(Length::Fixed(menu_size)).into()
-        }
+        // Always full-screen mode for reliable layer surface behavior
+        pie_canvas.width(Length::Fill).height(Length::Fill).into()
     }
 
     fn theme(&self, _id: Id) -> Theme {
@@ -473,8 +430,6 @@ struct PieCanvas<'a> {
     hovered: Option<usize>,
     /// If Some, draw the menu centered at this position; if None, center in bounds
     cursor_position: Option<(f32, f32)>,
-    /// Whether we're in full-screen mode
-    full_screen: bool,
     /// Dynamic menu radius
     menu_radius: f32,
     /// Dynamic inner radius (scales with menu size)
@@ -497,7 +452,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
             return (canvas::event::Status::Ignored, None);
         };
 
-        let menu_size = (self.menu_radius * 2.0 + ICON_SIZE as f32 + 80.0) as f32;
+        let menu_size = self.menu_radius * 2.0 + ICON_SIZE as f32 + 80.0;
 
         // Determine center point: cursor position or center of bounds
         let center = if let Some((cx, cy)) = self.cursor_position {
@@ -614,15 +569,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        // Expected size for our pie menu
-        let menu_size = (self.menu_radius * 2.0 + ICON_SIZE as f32 + 80.0) as f32;
-
-        // In fixed-size mode, skip drawing if bounds are wrong (scaling issue)
-        if !self.full_screen {
-            if (bounds.width - menu_size).abs() > 1.0 || (bounds.height - menu_size).abs() > 1.0 {
-                return vec![];
-            }
-        }
+        let menu_size = self.menu_radius * 2.0 + ICON_SIZE as f32 + 80.0;
 
         use cosmic::iced::widget::canvas::Frame;
         let mut frame = Frame::new(renderer, bounds.size());
@@ -969,11 +916,6 @@ fn app_style(_state: &PieMenuApp, _theme: &Theme) -> cosmic::iced_runtime::Appea
     }
 }
 
-/// Launch the pie menu with the given apps (centered on screen)
-pub fn show_pie_menu(apps: Vec<AppInfo>) {
-    show_pie_menu_at(apps, None);
-}
-
 /// Launch the pie menu at a specific screen position
 /// If position is None, centers on screen
 pub fn show_pie_menu_at(apps: Vec<AppInfo>, position: Option<(f32, f32)>) {
@@ -1010,7 +952,7 @@ struct CursorTracker {
 }
 
 impl CursorTracker {
-    fn new(_apps: Vec<AppInfo>) -> (Self, Task<TrackerMessage>) {
+    fn new() -> (Self, Task<TrackerMessage>) {
         // Create a full-screen layer surface at overlay level
         let mut settings = SctkLayerSurfaceSettings::default();
         settings.keyboard_interactivity = KeyboardInteractivity::Exclusive;
@@ -1235,12 +1177,12 @@ fn tracker_style(_state: &CursorTracker, _theme: &Theme) -> cosmic::iced_runtime
 
 /// Launch the pie menu with cursor tracking
 /// Shows an invisible full-screen overlay to capture cursor position first
-pub fn show_pie_menu_with_tracking(apps: Vec<AppInfo>) {
-    println!("Starting cursor tracking for {} apps", apps.len());
+pub fn show_pie_menu_with_tracking(_apps: Vec<AppInfo>) {
+    println!("Starting cursor tracking overlay...");
 
     let _ = cosmic::iced::daemon(CursorTracker::title, CursorTracker::update, CursorTracker::view)
         .subscription(CursorTracker::subscription)
         .theme(CursorTracker::theme)
         .style(tracker_style)
-        .run_with(move || CursorTracker::new(apps));
+        .run_with(CursorTracker::new);
 }

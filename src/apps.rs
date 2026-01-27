@@ -18,7 +18,8 @@ pub struct AppInfo {
     pub icon: Option<String>,
     /// Executable command
     pub exec: Option<String>,
-    /// Path to the desktop file
+    /// Path to the desktop file (for future use)
+    #[allow(dead_code)]
     pub desktop_path: PathBuf,
     /// Whether this app is currently running
     pub is_running: bool,

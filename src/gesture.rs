@@ -721,7 +721,7 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
                                 println!("{} fingers up - launching menu", cfg.finger_count);
                                 // Send message to trigger pie menu at cursor position
                                 if tx
-                                    .send(TrayMessage::ShowPieMenu { x: 0, y: 0 })
+                                    .send(TrayMessage::ShowPieMenu)
                                     .is_err()
                                 {
                                     // Channel closed, exit loop
@@ -776,7 +776,7 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
                                     SwipeAction::PieMenu => {
                                         // Open pie menu
                                         println!("Swipe {:?} - launching pie menu", direction);
-                                        if tx.send(TrayMessage::ShowPieMenu { x: 0, y: 0 }).is_err() {
+                                        if tx.send(TrayMessage::ShowPieMenu).is_err() {
                                             return;
                                         }
                                     }
@@ -836,7 +836,7 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
         // Check for pending trigger timeout (3-finger mode debounce)
         if check_pending_trigger(&mut state) {
             println!("{} finger tap confirmed - launching menu", cfg.finger_count);
-            if tx.send(TrayMessage::ShowPieMenu { x: 0, y: 0 }).is_err() {
+            if tx.send(TrayMessage::ShowPieMenu).is_err() {
                 return;
             }
         }

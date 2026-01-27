@@ -10,7 +10,7 @@ use ksni::blocking::TrayMethods as BlockingTrayMethods;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -104,8 +104,8 @@ fn get_theme_colors() -> ((u8, u8, u8), (u8, u8, u8)) {
 /// Messages that can be sent from the tray to the main application
 #[derive(Debug, Clone)]
 pub enum TrayMessage {
-    /// User clicked "Show Pie Menu" - includes cursor position
-    ShowPieMenu { x: i32, y: i32 },
+    /// User clicked "Show Pie Menu"
+    ShowPieMenu,
     /// User clicked "Settings"
     OpenSettings,
     /// User clicked "Quit"
@@ -115,7 +115,6 @@ pub enum TrayMessage {
 /// Reason for tray exit - used for suspend/resume and theme change detection
 #[derive(Debug)]
 enum TrayExitReason {
-    Quit,
     SuspendResume,
     ThemeChanged,
 }
@@ -190,7 +189,7 @@ impl Tray for PieMenuTray {
                 icon_name: "view-app-grid-symbolic".to_string(),
                 activate: Box::new(|tray: &mut Self| {
                     // Menu click doesn't have cursor pos, use 0,0 (will center)
-                    let _ = tray.tx.send(TrayMessage::ShowPieMenu { x: 0, y: 0 });
+                    let _ = tray.tx.send(TrayMessage::ShowPieMenu);
                 }),
                 ..Default::default()
             }),
@@ -413,7 +412,6 @@ pub fn run_tray_with_sender(tx: Sender<TrayMessage>, feedback: GestureFeedback) 
     // Retry loop for suspend/resume and theme changes
     loop {
         match run_tray_inner(tx.clone(), feedback.clone()) {
-            Ok(TrayExitReason::Quit) => break,
             Ok(TrayExitReason::SuspendResume) => {
                 println!("Detected suspend/resume, restarting tray...");
                 std::thread::sleep(Duration::from_millis(500));
@@ -432,16 +430,3 @@ pub fn run_tray_with_sender(tx: Sender<TrayMessage>, feedback: GestureFeedback) 
     }
 }
 
-/// Run the tray icon service (without gesture feedback)
-/// Returns a receiver for tray messages
-#[allow(dead_code)]
-pub fn run_tray() -> Result<Receiver<TrayMessage>, String> {
-    let (tx, rx) = mpsc::channel();
-    let feedback = GestureFeedback::new();
-
-    std::thread::spawn(move || {
-        run_tray_with_sender(tx, feedback);
-    });
-
-    Ok(rx)
-}

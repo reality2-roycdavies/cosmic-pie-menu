@@ -51,17 +51,6 @@ impl SwipeAction {
         ]
     }
 
-    /// Display name for the action (for UI display)
-    #[allow(dead_code)]
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::None => "None (system default)",
-            Self::AppLibrary => "App Library",
-            Self::Launcher => "Launcher",
-            Self::Workspaces => "Workspaces",
-            Self::PieMenu => "Pie Menu",
-        }
-    }
 }
 
 /// Configuration for pie menu gesture detection

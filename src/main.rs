@@ -183,7 +183,7 @@ fn main() {
     // Main event loop - handle tray messages
     loop {
         match rx.recv() {
-            Ok(TrayMessage::ShowPieMenu { .. }) => {
+            Ok(TrayMessage::ShowPieMenu) => {
                 // Kill any existing pie menu instances first (prevents multiple menus)
                 let _ = Command::new("pkill")
                     .args(["-f", "cosmic-pie-menu --track"])
