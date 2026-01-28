@@ -327,6 +327,18 @@ pub enum SwipeDirection {
     Right,
 }
 
+impl SwipeDirection {
+    /// Get the opposite direction
+    fn opposite(self) -> Self {
+        match self {
+            Self::Up => Self::Down,
+            Self::Down => Self::Up,
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+        }
+    }
+}
+
 /// Events returned from gesture event processing
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum GestureEvent {
@@ -623,6 +635,10 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
         current_finger_count
     );
 
+    // Track the last opened overlay (for opposite-direction closing)
+    // Stores (action, direction) so we know what to close and which direction opened it
+    let mut last_opened: Option<(SwipeAction, SwipeDirection)> = None;
+
     loop {
         // Periodically reload config from disk (for settings changes from subprocess)
         if last_config_check.elapsed() > config_check_interval {
@@ -753,66 +769,90 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
                                     continue;
                                 }
 
-                                // Debug: show current swipe config
-                                println!(
-                                    "Current swipe config: up={:?} down={:?} left={:?} right={:?}",
-                                    cfg.swipe_up, cfg.swipe_down, cfg.swipe_left, cfg.swipe_right
-                                );
-
-                                // Get the action for this swipe direction
-                                let action = match direction {
-                                    SwipeDirection::Up => cfg.swipe_up,
-                                    SwipeDirection::Down => cfg.swipe_down,
-                                    SwipeDirection::Left => cfg.swipe_left,
-                                    SwipeDirection::Right => cfg.swipe_right,
+                                // Check if this is an opposite-direction swipe to close something
+                                let (action_to_run, is_closing) = if let Some((prev_action, prev_dir)) = last_opened {
+                                    if direction == prev_dir.opposite() {
+                                        // Opposite direction - close the previous overlay
+                                        println!(
+                                            "Swipe {:?} detected as opposite of {:?} - closing {:?}",
+                                            direction, prev_dir, prev_action
+                                        );
+                                        (prev_action, true)
+                                    } else {
+                                        // Same or perpendicular direction - get configured action
+                                        let action = match direction {
+                                            SwipeDirection::Up => cfg.swipe_up,
+                                            SwipeDirection::Down => cfg.swipe_down,
+                                            SwipeDirection::Left => cfg.swipe_left,
+                                            SwipeDirection::Right => cfg.swipe_right,
+                                        };
+                                        (action, false)
+                                    }
+                                } else {
+                                    // Nothing open - get configured action
+                                    let action = match direction {
+                                        SwipeDirection::Up => cfg.swipe_up,
+                                        SwipeDirection::Down => cfg.swipe_down,
+                                        SwipeDirection::Left => cfg.swipe_left,
+                                        SwipeDirection::Right => cfg.swipe_right,
+                                    };
+                                    (action, false)
                                 };
-                                println!("Action for {:?}: {:?}", direction, action);
+
+                                println!("Action: {:?}, closing={}", action_to_run, is_closing);
 
                                 // Execute the action
-                                match action {
+                                match action_to_run {
                                     SwipeAction::None => {
                                         // Let system handle it (do nothing)
                                     }
                                     SwipeAction::PieMenu => {
-                                        // Open pie menu
+                                        // Pie menu doesn't need toggle tracking
                                         println!("Swipe {:?} - launching pie menu", direction);
+                                        last_opened = None;
                                         if tx.send(TrayMessage::ShowPieMenu).is_err() {
                                             return;
                                         }
                                     }
                                     _ => {
-                                        // Execute the command
-                                        if let Some(cmd) = action.command() {
-                                            println!("Swipe {:?} - launching {}", direction, cmd);
+                                        // Execute the command (toggles the overlay)
+                                        if let Some(cmd) = action_to_run.command() {
+                                            println!(
+                                                "Swipe {:?} - {} {}",
+                                                direction,
+                                                if is_closing { "closing" } else { "opening" },
+                                                cmd
+                                            );
+
                                             // Get display env vars for GUI commands
                                             let wayland = std::env::var("WAYLAND_DISPLAY").unwrap_or_default();
                                             let xdg_runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
-                                            println!("Environment: WAYLAND_DISPLAY={} XDG_RUNTIME_DIR={}", wayland, xdg_runtime);
 
-                                            match Command::new(cmd)
+                                            let spawn_result = Command::new(cmd)
                                                 .env("WAYLAND_DISPLAY", &wayland)
                                                 .env("XDG_RUNTIME_DIR", &xdg_runtime)
                                                 .spawn()
-                                            {
-                                                Ok(child) => {
-                                                    println!("Successfully spawned {} (pid {})", cmd, child.id());
-                                                }
-                                                Err(e) => {
-                                                    eprintln!("Failed to spawn {}: {}", cmd, e);
+                                                .or_else(|_| {
                                                     // Try with full path if simple command failed
                                                     let full_path = format!("/usr/bin/{}", cmd);
-                                                    match Command::new(&full_path)
+                                                    Command::new(&full_path)
                                                         .env("WAYLAND_DISPLAY", &wayland)
                                                         .env("XDG_RUNTIME_DIR", &xdg_runtime)
                                                         .spawn()
-                                                    {
-                                                        Ok(child) => {
-                                                            println!("Successfully spawned {} (pid {})", full_path, child.id());
-                                                        }
-                                                        Err(e2) => {
-                                                            eprintln!("Failed to spawn {}: {}", full_path, e2);
-                                                        }
+                                                });
+
+                                            match spawn_result {
+                                                Ok(child) => {
+                                                    println!("Successfully spawned {} (pid {})", cmd, child.id());
+                                                    // Update state: if closing, clear; if opening, record
+                                                    if is_closing {
+                                                        last_opened = None;
+                                                    } else {
+                                                        last_opened = Some((action_to_run, direction));
                                                     }
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("Failed to spawn {}: {}", cmd, e);
                                                 }
                                             }
                                         }
