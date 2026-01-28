@@ -769,27 +769,16 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
                                     continue;
                                 }
 
-                                // Check if this is an opposite-direction swipe to close something
+                                // Check if something is already open - any swipe closes it
                                 let (action_to_run, is_closing) = if let Some((prev_action, prev_dir)) = last_opened {
-                                    if direction == prev_dir.opposite() {
-                                        // Opposite direction - close the previous overlay
-                                        println!(
-                                            "Swipe {:?} detected as opposite of {:?} - closing {:?}",
-                                            direction, prev_dir, prev_action
-                                        );
-                                        (prev_action, true)
-                                    } else {
-                                        // Same or perpendicular direction - get configured action
-                                        let action = match direction {
-                                            SwipeDirection::Up => cfg.swipe_up,
-                                            SwipeDirection::Down => cfg.swipe_down,
-                                            SwipeDirection::Left => cfg.swipe_left,
-                                            SwipeDirection::Right => cfg.swipe_right,
-                                        };
-                                        (action, false)
-                                    }
+                                    // Something is open - close it with any swipe direction
+                                    println!(
+                                        "Swipe {:?} while {:?} open (opened with {:?}) - closing",
+                                        direction, prev_action, prev_dir
+                                    );
+                                    (prev_action, true)
                                 } else {
-                                    // Nothing open - get configured action
+                                    // Nothing open - get configured action for this direction
                                     let action = match direction {
                                         SwipeDirection::Up => cfg.swipe_up,
                                         SwipeDirection::Down => cfg.swipe_down,
