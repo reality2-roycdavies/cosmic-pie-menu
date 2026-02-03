@@ -320,11 +320,14 @@ impl PieMenuApp {
                             .filter(|s| !s.starts_with('%'))
                             .collect::<Vec<_>>()
                             .join(" ");
-                        let parts: Vec<&str> = exec_clean.split_whitespace().collect();
-                        if let Some(program) = parts.first() {
-                            let args: Vec<&str> = parts.iter().skip(1).copied().collect();
-                            let _ = Command::new(program).args(&args).spawn();
-                        }
+
+                        // Launch via shell with a small delay so the pie menu window
+                        // closes before the app starts. This prevents apps like
+                        // cosmic-screenshot from capturing the menu in their screenshot.
+                        let _ = Command::new("sh")
+                            .arg("-c")
+                            .arg(format!("sleep 0.1 && {}", exec_clean))
+                            .spawn();
                     }
                 }
                 std::process::exit(0);
@@ -759,13 +762,13 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                     let slice_center = (slice.start_angle + slice.end_angle) / 2.0;
 
                     // Calculate arc length based on running count:
-                    // 1 window = short indicator (20% of slice)
-                    // 2 windows = medium indicator (50% of slice)
-                    // 3+ windows = long indicator (80% of slice)
+                    // 1 window = small dot (12% of slice)
+                    // 2 windows = medium indicator (35% of slice)
+                    // 3+ windows = longer indicator (60% of slice)
                     let arc_fraction = match slice.running_count {
-                        1 => 0.20,
-                        2 => 0.50,
-                        _ => 0.80,
+                        1 => 0.12,
+                        2 => 0.35,
+                        _ => 0.60,
                     };
 
                     let arc_half_span = (slice_span * arc_fraction) / 2.0;
@@ -793,7 +796,8 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                             &arc,
                             Stroke::default()
                                 .with_color(theme.running_indicator_color)
-                                .with_width(3.0),
+                                .with_width(5.0)  // Thicker for better visibility
+                                .with_line_cap(cosmic::iced::widget::canvas::LineCap::Round),
                         );
                     }
                 }
