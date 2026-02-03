@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Information about an application
 #[derive(Debug, Clone)]
@@ -21,8 +21,8 @@ pub struct AppInfo {
     /// Path to the desktop file (for future use)
     #[allow(dead_code)]
     pub desktop_path: PathBuf,
-    /// Whether this app is currently running
-    pub is_running: bool,
+    /// Number of running windows for this app (0 = not running)
+    pub running_count: u32,
     /// Whether this app is a dock favorite (vs just running)
     pub is_favorite: bool,
 }
@@ -154,7 +154,7 @@ pub fn load_app_info(app_id: &str) -> Option<AppInfo> {
         icon,
         exec,
         desktop_path,
-        is_running: false,
+        running_count: 0,
         is_favorite: false,
     })
 }
@@ -173,7 +173,7 @@ pub fn load_apps(app_ids: &[String]) -> Vec<AppInfo> {
 
 /// Load apps with running status
 /// Returns favorites first, then running non-favorites
-pub fn load_apps_with_running(favorites: &[String], running_apps: &HashSet<String>) -> Vec<AppInfo> {
+pub fn load_apps_with_running(favorites: &[String], running_apps: &HashMap<String, u32>) -> Vec<AppInfo> {
     let mut apps = Vec::new();
     let mut seen_ids = HashSet::new();
 
@@ -181,18 +181,18 @@ pub fn load_apps_with_running(favorites: &[String], running_apps: &HashSet<Strin
     for id in favorites {
         if let Some(mut app) = load_app_info(id) {
             app.is_favorite = true;
-            app.is_running = is_app_running(id, running_apps);
+            app.running_count = get_running_count(id, running_apps);
             seen_ids.insert(id.clone());
             apps.push(app);
         }
     }
 
     // Then, add running apps that aren't favorites
-    for running_id in running_apps {
+    for (running_id, count) in running_apps {
         if !seen_ids.contains(running_id) && !is_id_in_set(running_id, &seen_ids) {
             if let Some(mut app) = load_app_info(running_id) {
                 app.is_favorite = false;
-                app.is_running = true;
+                app.running_count = *count;
                 seen_ids.insert(running_id.clone());
                 apps.push(app);
             }
@@ -202,34 +202,34 @@ pub fn load_apps_with_running(favorites: &[String], running_apps: &HashSet<Strin
     apps
 }
 
-/// Check if an app ID matches any in the running set (case-insensitive, handles variations)
-fn is_app_running(app_id: &str, running_apps: &HashSet<String>) -> bool {
+/// Get the running window count for an app ID (case-insensitive, handles variations)
+fn get_running_count(app_id: &str, running_apps: &HashMap<String, u32>) -> u32 {
     // Direct match
-    if running_apps.contains(app_id) {
-        return true;
+    if let Some(&count) = running_apps.get(app_id) {
+        return count;
     }
 
     let app_id_lower = app_id.to_lowercase();
-    for running in running_apps {
+    for (running, &count) in running_apps {
         // Case-insensitive match
         if running.to_lowercase() == app_id_lower {
-            return true;
+            return count;
         }
         // Match the last part after dots (e.g., org.gnome.Nautilus -> Nautilus)
         if let Some(name) = running.rsplit('.').next() {
             if name.to_lowercase() == app_id_lower {
-                return true;
+                return count;
             }
         }
         // Reverse: if app_id has dots, match its last part
         if let Some(name) = app_id.rsplit('.').next() {
             if running.to_lowercase() == name.to_lowercase() {
-                return true;
+                return count;
             }
         }
     }
 
-    false
+    0
 }
 
 /// Check if an ID is already in the seen set (handles case variations)
@@ -280,7 +280,7 @@ pub fn load_dock_applets(enabled_applets: &[String]) -> Vec<AppInfo> {
                 icon: Some(applet.icon.to_string()),
                 exec: Some(applet.exec.to_string()),
                 desktop_path: PathBuf::new(), // No desktop file for applets
-                is_running: false,
+                running_count: 0,
                 is_favorite: true, // Treat as favorites since they're in the dock
             });
         }

@@ -327,18 +327,6 @@ pub enum SwipeDirection {
     Right,
 }
 
-impl SwipeDirection {
-    /// Get the opposite direction
-    fn opposite(self) -> Self {
-        match self {
-            Self::Up => Self::Down,
-            Self::Down => Self::Up,
-            Self::Left => Self::Right,
-            Self::Right => Self::Left,
-        }
-    }
-}
-
 /// Events returned from gesture event processing
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum GestureEvent {

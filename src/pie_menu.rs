@@ -233,7 +233,7 @@ struct AppSlice {
     angle: f32,           // Center angle of this slice
     start_angle: f32,     // Start of slice
     end_angle: f32,       // End of slice
-    is_running: bool,     // Whether app is currently running
+    running_count: u32,   // Number of running windows (0 = not running)
 }
 
 /// State for the pie menu application
@@ -286,7 +286,7 @@ impl PieMenuApp {
                     angle,
                     start_angle,
                     end_angle,
-                    is_running: app.is_running,
+                    running_count: app.running_count,
                 }
             })
             .collect();
@@ -343,7 +343,7 @@ impl PieMenuApp {
             }
             Message::CanvasEvent(PieCanvasMessage::RightClickSegment(index)) => {
                 if let Some(app) = self.apps.get(index) {
-                    if app.is_running {
+                    if app.running_count > 0 {
                         // Switch to existing window
                         println!("Switching to: {}", app.name);
                         match windows::activate_window_by_app_id(&app.id) {
@@ -752,12 +752,25 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                 }
 
                 // Draw running indicator (arc at outer edge)
-                if slice.is_running {
+                // Arc length varies based on number of running instances (like COSMIC dock)
+                if slice.running_count > 0 {
                     let arc_radius = self.menu_radius + 7.0;
-                    // Shorten the arc slightly to leave gaps between slices
-                    let arc_padding = 0.06; // radians
-                    let arc_start = slice.start_angle + arc_padding;
-                    let arc_end = slice.end_angle - arc_padding;
+                    let slice_span = slice.end_angle - slice.start_angle;
+                    let slice_center = (slice.start_angle + slice.end_angle) / 2.0;
+
+                    // Calculate arc length based on running count:
+                    // 1 window = short indicator (20% of slice)
+                    // 2 windows = medium indicator (50% of slice)
+                    // 3+ windows = long indicator (80% of slice)
+                    let arc_fraction = match slice.running_count {
+                        1 => 0.20,
+                        2 => 0.50,
+                        _ => 0.80,
+                    };
+
+                    let arc_half_span = (slice_span * arc_fraction) / 2.0;
+                    let arc_start = slice_center - arc_half_span;
+                    let arc_end = slice_center + arc_half_span;
 
                     if arc_end > arc_start {
                         let arc = Path::new(|builder| {

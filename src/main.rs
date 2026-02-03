@@ -16,7 +16,7 @@ mod settings;
 mod tray;
 mod windows;
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
 use std::sync::mpsc;
@@ -62,19 +62,31 @@ X-GNOME-Autostart-enabled=true
 }
 
 /// Query running apps via subprocess to avoid Wayland connection conflicts
-fn query_running_via_subprocess() -> HashSet<String> {
+/// Returns a map of app_id -> window count
+fn query_running_via_subprocess() -> HashMap<String, u32> {
     let exe = std::env::current_exe().unwrap_or_else(|_| "cosmic-pie-menu".into());
     match Command::new(&exe).arg("--query-running").output() {
         Ok(output) => {
             String::from_utf8_lossy(&output.stdout)
                 .lines()
                 .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
+                .filter_map(|line| {
+                    // Parse "app_id:count" format
+                    let parts: Vec<&str> = line.rsplitn(2, ':').collect();
+                    if parts.len() == 2 {
+                        let count = parts[0].parse().unwrap_or(1);
+                        let app_id = parts[1].to_string();
+                        Some((app_id, count))
+                    } else {
+                        // Fallback for old format (just app_id)
+                        Some((line.to_string(), 1))
+                    }
+                })
                 .collect()
         }
         Err(e) => {
             eprintln!("Failed to query running apps: {}", e);
-            HashSet::new()
+            HashMap::new()
         }
     }
 }
@@ -127,10 +139,11 @@ fn main() {
     }
 
     // Internal: --query-running just prints running apps and exits (for subprocess use)
+    // Output format: app_id:count (one per line)
     if args.contains(&"--query-running".to_string()) {
         let running = windows::get_running_apps();
-        for app_id in running {
-            println!("{}", app_id);
+        for (app_id, count) in running {
+            println!("{}:{}", app_id, count);
         }
         return;
     }

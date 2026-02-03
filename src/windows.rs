@@ -5,7 +5,7 @@
 //!
 //! Also provides window activation using zcosmic_toplevel_manager_v1.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use wayland_client::{
     Connection, Dispatch, QueueHandle, Proxy,
@@ -26,8 +26,8 @@ use cosmic_protocols::toplevel_management::v1::client::{
 
 /// State for tracking running windows
 struct ToplevelState {
-    /// Set of app_ids for currently running applications
-    running_apps: Arc<Mutex<HashSet<String>>>,
+    /// Map of app_ids to window count for currently running applications
+    running_apps: Arc<Mutex<HashMap<String, u32>>>,
     /// Current app_id being built for a handle
     pending_app_ids: std::collections::HashMap<u32, String>,
     /// Whether the foreign toplevel list was found
@@ -35,7 +35,7 @@ struct ToplevelState {
 }
 
 impl ToplevelState {
-    fn new(running_apps: Arc<Mutex<HashSet<String>>>) -> Self {
+    fn new(running_apps: Arc<Mutex<HashMap<String, u32>>>) -> Self {
         Self {
             running_apps,
             pending_app_ids: std::collections::HashMap::new(),
@@ -108,14 +108,19 @@ impl Dispatch<ExtForeignToplevelHandleV1, ()> for ToplevelState {
             ext_foreign_toplevel_handle_v1::Event::Done => {
                 if let Some(app_id) = state.pending_app_ids.get(&handle_id) {
                     if let Ok(mut running) = state.running_apps.lock() {
-                        running.insert(app_id.clone());
+                        *running.entry(app_id.clone()).or_insert(0) += 1;
                     }
                 }
             }
             ext_foreign_toplevel_handle_v1::Event::Closed => {
                 if let Some(app_id) = state.pending_app_ids.remove(&handle_id) {
                     if let Ok(mut running) = state.running_apps.lock() {
-                        running.remove(&app_id);
+                        if let Some(count) = running.get_mut(&app_id) {
+                            *count = count.saturating_sub(1);
+                            if *count == 0 {
+                                running.remove(&app_id);
+                            }
+                        }
                     }
                 }
             }
@@ -124,8 +129,8 @@ impl Dispatch<ExtForeignToplevelHandleV1, ()> for ToplevelState {
     }
 }
 
-/// Get a snapshot of currently running application IDs
-pub fn get_running_apps() -> HashSet<String> {
+/// Get a snapshot of currently running application IDs with window counts
+pub fn get_running_apps() -> HashMap<String, u32> {
     // Run the Wayland query in a separate scope to ensure cleanup
     let result = query_running_apps();
 
@@ -135,13 +140,13 @@ pub fn get_running_apps() -> HashSet<String> {
     result
 }
 
-fn query_running_apps() -> HashSet<String> {
-    let running_apps = Arc::new(Mutex::new(HashSet::new()));
+fn query_running_apps() -> HashMap<String, u32> {
+    let running_apps = Arc::new(Mutex::new(HashMap::new()));
 
     // Try to connect to Wayland
     let conn = match Connection::connect_to_env() {
         Ok(c) => c,
-        Err(_) => return HashSet::new(),
+        Err(_) => return HashMap::new(),
     };
 
     let display = conn.display();
@@ -155,12 +160,12 @@ fn query_running_apps() -> HashSet<String> {
 
     // Roundtrip to get globals
     if event_queue.roundtrip(&mut state).is_err() {
-        return HashSet::new();
+        return HashMap::new();
     }
 
     // Another roundtrip to get toplevel info
     if event_queue.roundtrip(&mut state).is_err() {
-        return HashSet::new();
+        return HashMap::new();
     }
 
     // One more to ensure all Done events are received
@@ -170,7 +175,7 @@ fn query_running_apps() -> HashSet<String> {
     drop(event_queue);
     drop(conn);
 
-    // Return the collected app IDs
+    // Return the collected app IDs with counts
     match Arc::try_unwrap(running_apps) {
         Ok(mutex) => mutex.into_inner().unwrap_or_default(),
         Err(arc) => arc.lock().unwrap().clone(),
