@@ -77,6 +77,16 @@ pub struct PieMenuConfig {
     /// Action for swipe right
     #[serde(default)]
     pub swipe_right: SwipeAction,
+    /// Show background behind pie slices (also controls indicator ring background)
+    #[serde(default = "default_true")]
+    pub show_background: bool,
+    /// Highlight only icon on hover (vs whole segment)
+    #[serde(default)]
+    pub icon_only_highlight: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_swipe_threshold() -> i32 {
@@ -94,6 +104,8 @@ impl Default for PieMenuConfig {
             swipe_down: SwipeAction::AppLibrary,
             swipe_left: SwipeAction::None,
             swipe_right: SwipeAction::None,
+            show_background: true,
+            icon_only_highlight: false,
         }
     }
 }

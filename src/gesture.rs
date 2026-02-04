@@ -121,29 +121,19 @@ impl MultiTouchTracker {
 
     /// Attempt to mark that we have enough finger start positions captured.
     ///
-    /// Waits until either:
-    /// - We have `min_fingers_for_start` fingers with valid positions, OR
-    /// - 50ms has passed with at least 1 finger (settling time fallback)
-    ///
-    /// This prevents capturing start positions too early when not all fingers
-    /// have been registered yet.
+    /// Waits until all `min_fingers_for_start` fingers have valid positions.
+    /// This ensures consistent movement calculation across all fingers.
     fn try_capture_start(&mut self) {
         if self.start_captured {
             return;
         }
 
         let fingers_ready = self.fingers_with_start();
-        let settling_time = self.first_event_time
-            .map(|t| t.elapsed())
-            .unwrap_or(Duration::ZERO);
 
-        let should_capture = fingers_ready >= self.min_fingers_for_start
-            || (fingers_ready > 0 && settling_time >= Duration::from_millis(50));
-
-        if should_capture {
+        if fingers_ready >= self.min_fingers_for_start {
             println!(
-                "Start captured: {} fingers with positions after {:?}",
-                fingers_ready, settling_time
+                "Start captured: {} fingers with valid positions",
+                fingers_ready
             );
             self.start_captured = true;
         }
@@ -377,8 +367,8 @@ fn process_event(
         InputEventKind::Key(key) if key == tap_key => {
             if event.value() == 1 {
                 // Fingers went down - record the time and start fresh tracker
-                // Require at least (finger_count - 1) fingers before capturing start position
-                let min_fingers = (finger_count as usize).saturating_sub(1).max(2);
+                // Require all fingers to have valid positions before calculating movement
+                let min_fingers = finger_count as usize;
                 *state = GestureState::FingersDown {
                     start: Instant::now(),
                     tracker: MultiTouchTracker::new(min_fingers),
@@ -569,7 +559,7 @@ fn check_pending_trigger(state: &mut GestureState) -> bool {
     false
 }
 
-/// Wrapper to hold device
+/// Simple wrapper to hold device
 struct TouchpadDevice {
     device: Device,
 }
@@ -667,8 +657,9 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
             last_scan = Instant::now() - rescan_interval; // Force immediate rescan
         }
 
-        // Periodic device rescan (for hotplug support)
-        if last_scan.elapsed() > rescan_interval || devices.is_empty() {
+        // Only rescan when we have no devices (hotplug support)
+        // Don't rescan periodically when we have working devices - that breaks the grab
+        if devices.is_empty() && last_scan.elapsed() > Duration::from_secs(5) {
             let paths = find_touchpad_paths(current_finger_count);
             let required_key = if current_finger_count == 3 {
                 Key::BTN_TOOL_TRIPLETAP
@@ -691,7 +682,7 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
             if !new_devices.is_empty() {
                 devices = new_devices;
                 println!("Rescanned: found {} touchpad(s)", devices.len());
-            } else if devices.is_empty() {
+            } else {
                 // No devices available, wait before rescanning
                 std::thread::sleep(Duration::from_secs(5));
             }
@@ -704,7 +695,6 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
 
         // Process events from all devices
         for touchpad in &mut devices {
-            // fetch_events() is blocking but has a timeout in evdev
             match touchpad.device.fetch_events() {
                 Ok(events) => {
                     for event in events {
@@ -718,26 +708,18 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
                         ) {
                             GestureEvent::FingersDown => {
                                 println!("{} fingers down - icon highlighted", cfg.finger_count);
-                                // Trigger visual feedback on tray icon
                                 feedback.trigger();
                             }
                             GestureEvent::FingersUp => {
                                 println!("{} fingers up - launching menu", cfg.finger_count);
-                                // Send message to trigger pie menu at cursor position
-                                if tx
-                                    .send(TrayMessage::ShowPieMenu)
-                                    .is_err()
-                                {
-                                    // Channel closed, exit loop
+                                if tx.send(TrayMessage::ShowPieMenu).is_err() {
                                     return;
                                 }
                             }
                             GestureEvent::TriggerCancelled => {
-                                // Gesture cancelled, reset icon
                                 feedback.reset();
                             }
                             GestureEvent::SwipeDetected(direction) => {
-                                // Reset icon first
                                 feedback.reset();
 
                                 // Check workspace layout - only allow actions for available directions
@@ -781,7 +763,7 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
                                 // Execute the action
                                 match action_to_run {
                                     SwipeAction::None => {
-                                        // Let system handle it (do nothing)
+                                        // Nothing configured - do nothing
                                     }
                                     SwipeAction::PieMenu => {
                                         // Pie menu doesn't need toggle tracking

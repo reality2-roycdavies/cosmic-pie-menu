@@ -38,6 +38,10 @@ pub enum Message {
     SwipeLeftChanged(usize),
     /// Swipe right action changed
     SwipeRightChanged(usize),
+    /// Show background toggle
+    ShowBackgroundToggled(bool),
+    /// Icon-only highlight toggle
+    IconOnlyHighlightToggled(bool),
     /// Reset to defaults
     ResetDefaults,
 }
@@ -169,6 +173,14 @@ impl Application for SettingsApp {
             Message::SwipeRightChanged(index) => {
                 self.swipe_right_index = index;
                 self.config.swipe_right = index_to_swipe_action(index);
+                let _ = self.config.save();
+            }
+            Message::ShowBackgroundToggled(enabled) => {
+                self.config.show_background = enabled;
+                let _ = self.config.save();
+            }
+            Message::IconOnlyHighlightToggled(enabled) => {
+                self.config.icon_only_highlight = enabled;
                 let _ = self.config.save();
             }
             Message::ResetDefaults => {
@@ -326,6 +338,24 @@ impl Application for SettingsApp {
             )
         );
 
+        // Appearance section
+        let appearance_section = settings::section()
+            .title("Appearance")
+            .add(
+                settings::item(
+                    "Show Background",
+                    widget::toggler(self.config.show_background)
+                        .on_toggle(Message::ShowBackgroundToggled),
+                )
+            )
+            .add(
+                settings::item(
+                    "Icon-Only Highlight",
+                    widget::toggler(self.config.icon_only_highlight)
+                        .on_toggle(Message::IconOnlyHighlightToggled),
+                )
+            );
+
         // Reset button
         let reset_button = widget::button::standard("Reset to Defaults")
             .on_press(Message::ResetDefaults);
@@ -340,19 +370,24 @@ impl Application for SettingsApp {
                 layout_name, available_directions
             )).into(),
             swipe_section.into(),
+            text::caption("Customize the visual appearance of the pie menu.").into(),
+            appearance_section.into(),
             widget::container(reset_button)
                 .padding([16, 0, 0, 0])
                 .into(),
         ]);
 
-        widget::container(
-            widget::container(content)
-                .max_width(800)
+        widget::scrollable(
+            widget::container(
+                widget::container(content)
+                    .max_width(800)
+            )
+            .width(Length::Fill)
+            .center_x(Length::Fill)
+            .padding(24)
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .center_x(Length::Fill)
-        .padding(24)
         .into()
     }
 }
