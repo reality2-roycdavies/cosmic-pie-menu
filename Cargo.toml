@@ -55,7 +55,7 @@ cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols.git" }
 notify = "6"
 
 # Input device handling for gesture detection
-evdev = "0.12"
+evdev = { version = "0.12", features = ["tokio"] }
 libc = "0.2"
 
 [profile.release]
