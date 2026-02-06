@@ -220,6 +220,61 @@ pub enum PieCanvasMessage {
     ClickCenter,
 }
 
+/// Create a tinted glow SVG handle for an icon
+/// For SVGs: injects a color filter into the SVG content
+/// For raster images: wraps in an SVG with the image base64-encoded and filtered
+fn create_glow_handle(icon_path: &PathBuf, glow_color: &Color) -> Option<SvgHandle> {
+    use base64::Engine;
+
+    let r = (glow_color.r * 255.0) as u8;
+    let g = (glow_color.g * 255.0) as u8;
+    let b = (glow_color.b * 255.0) as u8;
+    let filter_defs = format!(
+        r#"<defs><filter id="gc"><feFlood flood-color="rgb({},{},{})" flood-opacity="0.18"/><feComposite in2="SourceAlpha" operator="in"/></filter></defs>"#,
+        r, g, b
+    );
+
+    let ext = icon_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    if ext.eq_ignore_ascii_case("svg") {
+        // Inject filter into existing SVG
+        let svg_content = fs::read_to_string(icon_path).ok()?;
+        if let Some(svg_start) = svg_content.find("<svg") {
+            if let Some(rel_end) = svg_content[svg_start..].find('>') {
+                let insert_pos = svg_start + rel_end + 1;
+                let tinted = format!(
+                    "{}{}<g filter=\"url(#gc)\">{}",
+                    &svg_content[..insert_pos],
+                    filter_defs,
+                    svg_content[insert_pos..].replace("</svg>", "</g></svg>")
+                );
+                return Some(SvgHandle::from_memory(tinted.into_bytes()));
+            }
+        }
+        None
+    } else {
+        // Wrap raster image in SVG with base64 data URI and filter
+        let bytes = fs::read(icon_path).ok()?;
+        let mime = match ext.to_ascii_lowercase().as_str() {
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            _ => "image/png",
+        };
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let size = ICON_SIZE;
+        let wrapper = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{size}" height="{size}">{filter}<image href="data:{mime};base64,{b64}" width="{size}" height="{size}" filter="url(#gc)"/></svg>"#,
+            size = size,
+            filter = filter_defs,
+            mime = mime,
+            b64 = b64,
+        );
+        Some(SvgHandle::from_memory(wrapper.into_bytes()))
+    }
+}
+
 /// App data with pre-calculated position
 struct AppSlice {
     index: usize,
@@ -229,6 +284,7 @@ struct AppSlice {
     start_angle: f32,     // Start of slice
     end_angle: f32,       // End of slice
     running_count: u32,   // Number of running windows (0 = not running)
+    glow_handle: Option<SvgHandle>, // Pre-created tinted glow handle
 }
 
 /// State for the pie menu application
@@ -270,6 +326,11 @@ impl PieMenuApp {
 
         // Pre-calculate slice data (positions calculated during draw)
         let num_apps = apps.len();
+
+        // Get glow color from theme for pre-creating tinted icon handles
+        let pie_theme = PieTheme::current();
+        let glow_color = pie_theme.segment_hover_color;
+
         let slices: Vec<AppSlice> = apps
             .iter()
             .enumerate()
@@ -283,6 +344,13 @@ impl PieMenuApp {
                 let icon_path = app.icon.as_ref()
                     .and_then(|name| find_icon_path(name, ICON_SIZE));
 
+                // Pre-create tinted glow handle if icon_only_highlight is enabled
+                let glow_handle = if config.icon_only_highlight {
+                    icon_path.as_ref().and_then(|p| create_glow_handle(p, &glow_color))
+                } else {
+                    None
+                };
+
                 AppSlice {
                     index: i,
                     name: app.name.clone(),
@@ -291,6 +359,7 @@ impl PieMenuApp {
                     start_angle,
                     end_angle,
                     running_count: app.running_count,
+                    glow_handle,
                 }
             })
             .collect();
@@ -765,35 +834,30 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                     center.y + icon_radius * slice.angle.sin(),
                 );
 
-                // Draw glow effect behind icon when in icon_only_highlight mode
-                if self.icon_only_highlight && hover_offset > 0.01 {
-                    let glow_color = theme.segment_hover_color;
-                    let glow_base_radius = ICON_SIZE as f32 / 2.0 + 8.0;
-                    let num_rings = 12;
+                let icon_size = ICON_SIZE as f32;
 
-                    for i in 0..num_rings {
-                        let ring_progress = i as f32 / num_rings as f32;
-                        let ring_radius = glow_base_radius + ring_progress * 16.0;
-                        // Alpha fades out from center, scaled by hover animation
-                        let alpha = (1.0 - ring_progress) * 0.4 * hover_offset;
-                        let ring_color = Color::from_rgba(
-                            glow_color.r,
-                            glow_color.g,
-                            glow_color.b,
-                            alpha,
-                        );
-                        let glow_ring = Path::circle(icon_center, ring_radius);
-                        frame.stroke(
-                            &glow_ring,
-                            Stroke::default()
-                                .with_color(ring_color)
-                                .with_width(3.0),
-                        );
+                // Draw icon-shaped glow effect when in icon_only_highlight mode
+                // Uses pre-created tinted SVG handles drawn at progressively larger sizes
+                if self.icon_only_highlight && hover_offset > 0.01 {
+                    if let Some(ref glow_handle) = slice.glow_handle {
+                        let glow_svg = Svg::new(glow_handle.clone());
+                        // Draw 4 layers at increasing sizes - overlap creates natural falloff
+                        let glow_scales: &[f32] = &[1.6, 1.45, 1.3, 1.15];
+                        for &scale in glow_scales {
+                            let anim_scale = 1.0 + (scale - 1.0) * hover_offset;
+                            let glow_size = icon_size * anim_scale;
+                            let glow_bounds = Rectangle {
+                                x: icon_center.x - glow_size / 2.0,
+                                y: icon_center.y - glow_size / 2.0,
+                                width: glow_size,
+                                height: glow_size,
+                            };
+                            frame.draw_svg(glow_bounds, glow_svg.clone());
+                        }
                     }
                 }
 
                 // Draw the icon or fallback to letter
-                let icon_size = ICON_SIZE as f32;
                 let icon_bounds = Rectangle {
                     x: icon_center.x - icon_size / 2.0,
                     y: icon_center.y - icon_size / 2.0,

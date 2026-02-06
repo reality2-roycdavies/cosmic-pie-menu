@@ -58,6 +58,9 @@ notify = "6"
 evdev = { version = "0.12", features = ["tokio"] }
 libc = "0.2"
 
+# Base64 encoding for embedding raster images in SVG glow handles
+base64 = "0.22"
+
 [profile.release]
 lto = true
 codegen-units = 1
