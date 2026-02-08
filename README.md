@@ -38,8 +38,7 @@ All three projects serve as case studies in AI-assisted software development, wi
 - **Center Display**: Shows app name with readable background pill when hovering
 - **Transparent Center**: See through to your desktop in the center of the menu
 - **Keyboard Support**: Press Escape to close, or click the center
-- **System Tray**: Theme-aware tray icon for click-to-open access
-- **Autostart**: Automatically creates autostart entry on first run
+- **COSMIC Panel Applet**: Native panel integration with popup menu
 - **Scaled Display Support**: Works correctly on HiDPI/scaled displays
 - **Suspend/Resume Safe**: Uses full-screen layer surface for reliable display
 
@@ -86,7 +85,7 @@ Or **log out and back in** for the change to take effect permanently.
 
 > **Note**: This grants read access to `/dev/input/` devices. If this is a privacy or security concern for your use case, be aware of this implication.
 
-Without input group membership, the tray daemon will still work but gesture detection will be disabled.
+Without input group membership, the panel applet will still work but gesture detection will be disabled.
 
 ### From Release (Recommended)
 
@@ -115,46 +114,37 @@ cd cosmic-pie-menu
 # Build in release mode
 cargo build --release
 
-# Install to user local bin (recommended)
-cp target/release/cosmic-pie-menu ~/.local/bin/
-
-# Or install system-wide
+# Install binary, desktop entry, and icon
 sudo cp target/release/cosmic-pie-menu /usr/local/bin/
+sudo cp resources/io.github.reality2_roycdavies.cosmic-pie-menu.desktop /usr/share/applications/
+sudo cp resources/io.github.reality2_roycdavies.cosmic-pie-menu-symbolic.svg /usr/share/icons/hicolor/symbolic/apps/
 ```
+
+Then add the applet to your COSMIC panel via **Settings → Desktop → Panel → Applets**.
 
 ### Dependencies
 
 - Rust 1.75 or later
 - COSMIC desktop environment (or libcosmic)
-- D-Bus (for system tray)
 - Access to `/dev/input/` (for gesture detection - requires `input` group membership)
 
 ## Usage
 
-### Starting the Daemon
+### Panel Applet
 
-For first-time setup or testing, simply run:
+After installation, add the applet to your COSMIC panel:
 
-```bash
-cosmic-pie-menu
-```
+1. Open **COSMIC Settings → Desktop → Panel**
+2. Click **Applets** and add **COSMIC Pie Menu**
 
-To run in the background (detached from terminal):
-
-```bash
-cosmic-pie-menu &
-```
-
-On first run, an autostart entry is created at `~/.config/autostart/cosmic-pie-menu.desktop`, so the daemon will start automatically on future logins.
-
-The daemon provides:
-- **System tray icon**: Click to show the pie menu, right-click for settings
+The panel applet provides:
+- **Panel icon**: Click to open a popup with "Show Pie Menu" and "Settings" buttons
 - **Touchpad gesture**: Tap with configured number of fingers on your touchpad
 
 ### Gesture Workflow
 
 **Tap to Open Pie Menu:**
-1. **Multi-finger tap** on touchpad (3 or 4 fingers, configurable) - tray icon turns cyan
+1. **Multi-finger tap** on touchpad (3 or 4 fingers, configurable)
 2. **Move mouse** to where you want the menu
 3. **Lift fingers** - menu appears at cursor position
 4. **Press Escape** once the menu appears to close it without selecting an app
@@ -178,23 +168,6 @@ You can also add a keyboard shortcut to show the pie menu:
 
 The `--track` option briefly displays an invisible overlay to capture the cursor position, then shows the menu there.
 
-### Autostart
-
-The tray daemon automatically creates an autostart entry on first run at `~/.config/autostart/cosmic-pie-menu.desktop`. After running `cosmic-pie-menu` once, it will start automatically on login.
-
-To manually set up autostart:
-
-```bash
-mkdir -p ~/.config/autostart
-cat > ~/.config/autostart/cosmic-pie-menu.desktop << EOF
-[Desktop Entry]
-Name=COSMIC Pie Menu
-Exec=cosmic-pie-menu
-Type=Application
-X-GNOME-Autostart-enabled=true
-EOF
-```
-
 ## How It Works
 
 1. Reads dock applets from `~/.config/cosmic/com.system76.CosmicPanel.Dock/v1/plugins_center`
@@ -209,7 +182,7 @@ EOF
 
 ### Settings Window
 
-Right-click the system tray icon and select **Settings** to open the configuration window. Settings are saved to `~/.config/cosmic-pie-menu/config.json` and take effect immediately (hot-reload).
+Click the panel applet and select **Settings** to open the configuration window. Settings are saved to `~/.config/cosmic-pie-menu/config.json` and take effect immediately (hot-reload).
 
 | Setting | Description | Default |
 |---------|-------------|---------|
@@ -253,7 +226,7 @@ cargo build
 # Release build (recommended)
 cargo build --release
 
-# Run the tray daemon
+# Run the applet (standalone, for testing)
 cargo run
 ```
 
@@ -262,13 +235,13 @@ cargo run
 ```
 cosmic-pie-menu/
 ├── src/
-│   ├── main.rs       # Entry point and tray event loop
+│   ├── main.rs       # Entry point and subprocess routing
+│   ├── applet.rs     # COSMIC panel applet with popup menu
 │   ├── apps.rs       # Desktop file parsing and icon lookup
 │   ├── config.rs     # Config loading (dock favorites + gesture settings)
 │   ├── gesture.rs    # Touchpad gesture detection (evdev)
 │   ├── pie_menu.rs   # Radial menu UI (canvas-based with theme integration)
 │   ├── settings.rs   # Settings window UI
-│   ├── tray.rs       # System tray icon with gesture feedback
 │   └── windows.rs    # Running app detection via Wayland protocol
 ├── docs/
 │   ├── README.md             # Documentation overview
@@ -276,8 +249,10 @@ cosmic-pie-menu/
 │   ├── THEMATIC_ANALYSIS.md  # AI collaboration patterns
 │   └── transcripts/          # Full development conversation
 ├── screenshots/              # Application screenshots
+├── resources/
+│   ├── io.github.reality2_roycdavies.cosmic-pie-menu.desktop
+│   └── io.github.reality2_roycdavies.cosmic-pie-menu-symbolic.svg
 ├── Cargo.toml
-├── cosmic-pie-menu.desktop
 ├── LICENSE
 └── README.md
 ```
@@ -337,6 +312,8 @@ From developing this project, several notable patterns emerged:
 - **Canvas over Widgets**: Standard row/column layouts couldn't achieve true circular positioning. Canvas-based rendering with trigonometry provided full control over radial geometry.
 
 - **Wayland Security Model**: Unlike X11, Wayland doesn't expose global cursor position to applications. Solved via transparent overlay that captures cursor on mouse movement.
+
+- **Native Panel Applet**: Using libcosmic's `applet` feature provides automatic panel integration, popup menus, and theme support without the complexity of D-Bus-based system tray protocols.
 
 - **Gesture Detection via evdev**: Linux evdev subsystem provides raw touchpad events (BTN_TOOL_TRIPLETAP, BTN_TOOL_QUADTAP, ABS_MT_POSITION) independent of compositor handling. Distinguishing taps from swipes requires tracking both duration and finger movement.
 

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Symbolic icon: 8 dots in a circle + center dot -->
+  <!-- Uses currentColor for automatic theme adaptation -->
+  <g fill="currentColor">
+    <!-- Center dot -->
+    <circle cx="8" cy="8" r="1.8"/>
+    <!-- Top -->
+    <circle cx="8" cy="2.2" r="1.2"/>
+    <!-- Top-right -->
+    <circle cx="12.1" cy="3.9" r="1.2"/>
+    <!-- Right -->
+    <circle cx="13.8" cy="8" r="1.2"/>
+    <!-- Bottom-right -->
+    <circle cx="12.1" cy="12.1" r="1.2"/>
+    <!-- Bottom -->
+    <circle cx="8" cy="13.8" r="1.2"/>
+    <!-- Bottom-left -->
+    <circle cx="3.9" cy="12.1" r="1.2"/>
+    <!-- Left -->
+    <circle cx="2.2" cy="8" r="1.2"/>
+    <!-- Top-left -->
+    <circle cx="3.9" cy="3.9" r="1.2"/>
+  </g>
+</svg>

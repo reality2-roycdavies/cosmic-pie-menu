@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=COSMIC Pie Menu
+Type=Application
+Exec=cosmic-pie-menu
+Terminal=false
+Categories=COSMIC;
+Keywords=COSMIC;Pie;Menu;Launcher;
+Icon=io.github.reality2_roycdavies.cosmic-pie-menu-symbolic
+StartupNotify=true
+NoDisplay=true
+OnlyShowIn=COSMIC;
+X-CosmicApplet=true

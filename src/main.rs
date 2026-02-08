@@ -6,60 +6,18 @@
 //! - Reads favorites from COSMIC dock config
 //! - Displays apps in a radial/pie layout
 //! - Size scales with number of apps
-//! - Tray icon for quick access and settings
+//! - COSMIC panel applet for quick access and settings
 
+mod applet;
 mod apps;
 mod config;
 mod gesture;
 mod pie_menu;
 mod settings;
-mod tray;
 mod windows;
 
 use std::collections::HashMap;
-use std::fs;
 use std::process::Command;
-use std::sync::mpsc;
-use std::sync::{Arc, RwLock};
-use config::{GestureConfig, PieMenuConfig};
-use tray::{GestureFeedback, TrayMessage};
-
-/// Ensure autostart desktop file exists so tray starts on login
-fn ensure_autostart() {
-    let autostart_dir = match dirs::config_dir() {
-        Some(config) => config.join("autostart"),
-        None => return,
-    };
-
-    // Create autostart directory if needed
-    if !autostart_dir.exists() {
-        let _ = fs::create_dir_all(&autostart_dir);
-    }
-
-    let desktop_file = autostart_dir.join("cosmic-pie-menu.desktop");
-
-    // Don't overwrite if user has modified it
-    if desktop_file.exists() {
-        return;
-    }
-
-    let content = r#"[Desktop Entry]
-Type=Application
-Name=COSMIC Pie Menu
-Comment=Radial app launcher system tray
-Exec=cosmic-pie-menu
-Icon=cosmic-pie-menu
-Terminal=false
-Categories=Utility;
-X-GNOME-Autostart-enabled=true
-"#;
-
-    if let Err(e) = fs::write(&desktop_file, content) {
-        eprintln!("Failed to create autostart file: {}", e);
-    } else {
-        println!("Created autostart file at {:?}", desktop_file);
-    }
-}
 
 /// Query running apps via subprocess to avoid Wayland connection conflicts
 /// Returns a map of app_id -> window count
@@ -111,7 +69,7 @@ fn load_all_pie_apps() -> Vec<apps::AppInfo> {
     all_apps
 }
 
-fn main() {
+fn main() -> cosmic::iced::Result {
     let args: Vec<String> = std::env::args().collect();
 
     // Internal: --pie-at X Y, show the pie menu at a specific position (used by gesture system)
@@ -121,7 +79,7 @@ fn main() {
             let y: f32 = args[pos + 2].parse().unwrap_or(0.0);
             let apps = load_all_pie_apps();
             pie_menu::show_pie_menu_at(apps, Some((x, y)));
-            return;
+            return Ok(());
         }
     }
 
@@ -129,13 +87,13 @@ fn main() {
     if args.contains(&"--track".to_string()) {
         let apps = load_all_pie_apps();
         pie_menu::show_pie_menu_with_tracking(apps);
-        return;
+        return Ok(());
     }
 
-    // Internal: --settings flag, show the settings window (used by tray menu)
+    // Internal: --settings flag, show the settings window
     if args.contains(&"--settings".to_string()) {
         settings::run_settings(None);
-        return;
+        return Ok(());
     }
 
     // Internal: --query-running just prints running apps and exits (for subprocess use)
@@ -145,96 +103,10 @@ fn main() {
         for (app_id, count) in running {
             println!("{}:{}", app_id, count);
         }
-        return;
+        return Ok(());
     }
 
-    println!("COSMIC Pie Menu starting...");
-
-    // Ensure autostart file exists for next login
-    ensure_autostart();
-
-    // Load configuration
-    let pie_config = PieMenuConfig::load();
-    println!(
-        "Loaded config: {}-finger tap, {}ms duration, {} movement threshold",
-        pie_config.finger_count, pie_config.tap_duration_ms, pie_config.tap_movement
-    );
-
-    // Create shared config for hot-reload between settings and gesture detection
-    let shared_config: Arc<RwLock<GestureConfig>> =
-        Arc::new(RwLock::new(GestureConfig::from(&pie_config)));
-
-    // Load favorites from COSMIC dock config
-    let favorites = config::read_favorites();
-    let apps_list = apps::load_apps(&favorites);
-    println!("Loaded {} apps from dock favorites", apps_list.len());
-
-    // Create shared channel for tray and gesture detection
-    let (tx, rx) = mpsc::channel();
-
-    // Create shared gesture feedback state for tray icon visual feedback
-    let gesture_feedback = GestureFeedback::new();
-
-    // Start the tray icon with shared sender and feedback
-    let tray_tx = tx.clone();
-    let tray_feedback = gesture_feedback.clone();
-    std::thread::spawn(move || {
-        tray::run_tray_with_sender(tray_tx, tray_feedback);
-    });
-
-    println!("Tray icon started. Click it or use the menu.");
-
-    // Start gesture detection (non-fatal if it fails)
-    match gesture::start_gesture_thread(tx, gesture_feedback.clone(), shared_config.clone()) {
-        Ok(()) => println!(
-            "Gesture detection started ({}-finger tap to show menu)",
-            pie_config.finger_count
-        ),
-        Err(e) => eprintln!("Gesture detection not available: {}", e),
-    }
-
-    // Main event loop - handle tray messages
-    loop {
-        match rx.recv() {
-            Ok(TrayMessage::ShowPieMenu) => {
-                // Kill any existing pie menu instances first (prevents multiple menus)
-                let _ = Command::new("pkill")
-                    .args(["-f", "cosmic-pie-menu --track"])
-                    .output();
-                let _ = Command::new("pkill")
-                    .args(["-f", "cosmic-pie-menu --pie-at"])
-                    .output();
-
-                println!("Launching pie menu overlay...");
-                let exe = std::env::current_exe().unwrap_or_else(|_| "cosmic-pie-menu".into());
-
-                // Spawn menu and wait for it to exit in a background thread
-                // so we can reset the icon when it closes
-                let feedback_clone = gesture_feedback.clone();
-                std::thread::spawn(move || {
-                    if let Ok(mut child) = Command::new(exe).arg("--track").spawn() {
-                        // Wait for the tracker/menu to exit
-                        let _ = child.wait();
-                    }
-                    // Reset icon when menu closes (user selected app or pressed Escape)
-                    feedback_clone.reset();
-                });
-            }
-            Ok(TrayMessage::OpenSettings) => {
-                println!("Opening settings window...");
-                let exe = std::env::current_exe().unwrap_or_else(|_| "cosmic-pie-menu".into());
-                if let Err(e) = Command::new(exe).arg("--settings").spawn() {
-                    eprintln!("Failed to open settings: {}", e);
-                }
-            }
-            Ok(TrayMessage::Quit) => {
-                println!("Quit requested, exiting...");
-                break;
-            }
-            Err(e) => {
-                eprintln!("Channel error: {}", e);
-                break;
-            }
-        }
-    }
+    // Default: run as COSMIC panel applet
+    println!("COSMIC Pie Menu starting as panel applet...");
+    applet::run_applet()
 }

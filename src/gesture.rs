@@ -21,7 +21,7 @@ use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use crate::config::{GestureConfig, PieMenuConfig, SharedConfig, SwipeAction, WorkspaceLayout, read_workspace_layout};
-use crate::tray::{GestureFeedback, TrayMessage};
+use crate::applet::GestureMessage;
 use std::process::Command;
 
 /// Maximum number of touch slots to track (most touchpads support up to 5-10)
@@ -565,7 +565,7 @@ struct TouchpadDevice {
 }
 
 /// Main gesture detection loop with configurable parameters
-fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: SharedConfig) {
+fn gesture_loop(tx: Sender<GestureMessage>, config: SharedConfig) {
     let mut state = GestureState::Idle;
     let mut last_scan = Instant::now();
     let mut last_config_check = Instant::now();
@@ -708,19 +708,19 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
                         ) {
                             GestureEvent::FingersDown => {
                                 println!("{} fingers down - icon highlighted", cfg.finger_count);
-                                feedback.trigger();
+                                let _ = tx.send(GestureMessage::FingersDown);
                             }
                             GestureEvent::FingersUp => {
                                 println!("{} fingers up - launching menu", cfg.finger_count);
-                                if tx.send(TrayMessage::ShowPieMenu).is_err() {
+                                if tx.send(GestureMessage::ShowPieMenu).is_err() {
                                     return;
                                 }
                             }
                             GestureEvent::TriggerCancelled => {
-                                feedback.reset();
+                                let _ = tx.send(GestureMessage::Reset);
                             }
                             GestureEvent::SwipeDetected(direction) => {
-                                feedback.reset();
+                                let _ = tx.send(GestureMessage::Reset);
 
                                 // Check workspace layout - only allow actions for available directions
                                 let layout = read_workspace_layout();
@@ -769,7 +769,7 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
                                         // Pie menu doesn't need toggle tracking
                                         println!("Swipe {:?} - launching pie menu", direction);
                                         last_opened = None;
-                                        if tx.send(TrayMessage::ShowPieMenu).is_err() {
+                                        if tx.send(GestureMessage::ShowPieMenu).is_err() {
                                             return;
                                         }
                                     }
@@ -835,7 +835,7 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
         // Check for pending trigger timeout (3-finger mode debounce)
         if check_pending_trigger(&mut state) {
             println!("{} finger tap confirmed - launching menu", cfg.finger_count);
-            if tx.send(TrayMessage::ShowPieMenu).is_err() {
+            if tx.send(GestureMessage::ShowPieMenu).is_err() {
                 return;
             }
         }
@@ -856,8 +856,7 @@ fn gesture_loop(tx: Sender<TrayMessage>, feedback: GestureFeedback, config: Shar
 /// The `config` parameter provides shared configuration that can be updated at runtime
 /// for hot-reload support.
 pub fn start_gesture_thread(
-    tx: Sender<TrayMessage>,
-    feedback: GestureFeedback,
+    tx: Sender<GestureMessage>,
     config: SharedConfig,
 ) -> Result<(), GestureError> {
     // Read initial finger count from config
@@ -904,7 +903,7 @@ pub fn start_gesture_thread(
     // Spawn the detection thread
     std::thread::Builder::new()
         .name("gesture-detector".to_string())
-        .spawn(move || gesture_loop(tx, feedback, config))
+        .spawn(move || gesture_loop(tx, config))
         .map_err(|e| GestureError::ThreadError(e.to_string()))?;
 
     Ok(())

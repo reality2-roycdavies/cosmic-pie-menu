@@ -7,13 +7,11 @@ license = "GPL-3.0"
 description = "Pie menu launcher for COSMIC desktop - radial app tray"
 
 [dependencies]
-# COSMIC GUI toolkit with Wayland layer-shell support
+# COSMIC GUI toolkit - applet feature enables panel integration
+# wgpu needed for pie menu canvas rendering (subprocess mode)
 libcosmic = { git = "https://github.com/pop-os/libcosmic.git", default-features = false, features = [
-    "a11y",
-    "tokio",
-    "winit",
+    "applet",
     "wgpu",
-    "wayland",
 ] }
 
 # Async runtime
@@ -40,9 +38,6 @@ freedesktop-icons = "0.2"
 
 # Image handling for icons
 image = "0.24"
-
-# System tray (StatusNotifierItem protocol)
-ksni = { version = "0.3.3", features = ["blocking"] }
 
 # Wayland protocols for detecting running apps
 wayland-client = "0.31"
