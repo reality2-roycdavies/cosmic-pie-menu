@@ -15,7 +15,8 @@
 //! - Respects COSMIC workspace layout (ignores swipes used for workspace switching)
 //! - Multitouch tracking with per-finger movement averaging for accurate direction detection
 
-use evdev::{AbsoluteAxisType, Device, InputEventKind, Key};
+use evdev::{AbsoluteAxisType, Device, InputEventKind, Key, RelativeAxisType};
+use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
@@ -301,6 +302,72 @@ fn is_touchpad_with_finger_support(device: &Device, finger_count: u8) -> bool {
     abs.contains(AbsoluteAxisType::ABS_X) || abs.contains(AbsoluteAxisType::ABS_MT_POSITION_X)
 }
 
+/// Find all mouse device paths in /dev/input/ that have a middle button
+fn find_mouse_paths() -> Vec<PathBuf> {
+    let mut mice = Vec::new();
+
+    let input_dir = match std::fs::read_dir("/dev/input") {
+        Ok(dir) => dir,
+        Err(_) => return mice,
+    };
+
+    for entry in input_dir.flatten() {
+        let path = entry.path();
+
+        if !path.to_string_lossy().contains("event") {
+            continue;
+        }
+
+        let device = match Device::open(&path) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        if is_mouse_with_middle_button(&device) {
+            println!(
+                "Found mouse with middle button: {} ({})",
+                device.name().unwrap_or("Unknown"),
+                path.display()
+            );
+            mice.push(path);
+        }
+    }
+
+    mice
+}
+
+/// Check if a device is a mouse (has relative axes and middle button, but NOT a touchpad)
+fn is_mouse_with_middle_button(device: &Device) -> bool {
+    let keys = match device.supported_keys() {
+        Some(k) => k,
+        None => return false,
+    };
+
+    // Must have BTN_MIDDLE
+    if !keys.contains(Key::BTN_MIDDLE) {
+        return false;
+    }
+
+    // Must have relative axes (mouse characteristic)
+    let rel = match device.supported_relative_axes() {
+        Some(r) => r,
+        None => return false,
+    };
+
+    if !rel.contains(RelativeAxisType::REL_X) {
+        return false;
+    }
+
+    // Exclude touchpads (they have absolute axes for multitouch)
+    if let Some(abs) = device.supported_absolute_axes() {
+        if abs.contains(AbsoluteAxisType::ABS_MT_POSITION_X) {
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Debounce time for 3-finger mode to avoid false triggers on 3→4 transitions
 const PENDING_TRIGGER_DEBOUNCE: Duration = Duration::from_millis(150);
 
@@ -559,8 +626,22 @@ fn check_pending_trigger(state: &mut GestureState) -> bool {
     false
 }
 
+/// Set a device's file descriptor to non-blocking mode
+fn set_nonblocking(device: &Device) {
+    let fd = device.as_raw_fd();
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+    }
+}
+
 /// Simple wrapper to hold device
 struct TouchpadDevice {
+    device: Device,
+}
+
+/// Wrapper for mouse device (middle-click trigger)
+struct MouseDevice {
     device: Device,
 }
 
@@ -595,6 +676,7 @@ fn gesture_loop(tx: Sender<GestureMessage>, config: SharedConfig) {
         .filter_map(|p| {
             let device = Device::open(p).ok()?;
             if device.supported_keys()?.contains(required_key) {
+                set_nonblocking(&device);
                 Some(TouchpadDevice { device })
             } else {
                 None
@@ -602,16 +684,40 @@ fn gesture_loop(tx: Sender<GestureMessage>, config: SharedConfig) {
         })
         .collect();
 
-    if devices.is_empty() {
-        eprintln!("No touchpad devices available for gesture detection");
-        return;
+    // Initial mouse device scan (for middle-click trigger)
+    let mut mouse_devices: Vec<MouseDevice> = if current_cfg.middle_click_trigger {
+        find_mouse_paths()
+            .iter()
+            .filter_map(|p| {
+                let device = Device::open(p).ok()?;
+                set_nonblocking(&device);
+                Some(MouseDevice { device })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let mut current_middle_click = current_cfg.middle_click_trigger;
+    let mut last_mouse_scan = Instant::now();
+
+    if devices.is_empty() && mouse_devices.is_empty() {
+        eprintln!("No input devices available for gesture detection");
+        // Don't return - keep running so hotplugged devices can be found
     }
 
-    println!(
-        "Gesture detection started with {} touchpad(s) ({}-finger tap)",
-        devices.len(),
-        current_finger_count
-    );
+    if !devices.is_empty() {
+        println!(
+            "Gesture detection started with {} touchpad(s) ({}-finger tap)",
+            devices.len(),
+            current_finger_count
+        );
+    }
+    if !mouse_devices.is_empty() {
+        println!(
+            "Middle-click trigger enabled with {} mouse device(s)",
+            mouse_devices.len()
+        );
+    }
 
     // Track the last opened overlay (for opposite-direction closing)
     // Stores (action, direction) so we know what to close and which direction opened it
@@ -633,6 +739,26 @@ fn gesture_loop(tx: Sender<GestureMessage>, config: SharedConfig) {
                     new_cfg.tap_max_duration.as_millis(),
                     new_cfg.tap_max_movement
                 );
+            }
+
+            // Check if middle-click setting changed
+            if new_cfg.middle_click_trigger != current_middle_click {
+                current_middle_click = new_cfg.middle_click_trigger;
+                if current_middle_click {
+                    println!("Middle-click trigger enabled, scanning for mice...");
+                    mouse_devices = find_mouse_paths()
+                        .iter()
+                        .filter_map(|p| {
+                            let device = Device::open(p).ok()?;
+                            set_nonblocking(&device);
+                            Some(MouseDevice { device })
+                        })
+                        .collect();
+                    println!("Found {} mouse device(s)", mouse_devices.len());
+                } else {
+                    println!("Middle-click trigger disabled");
+                    mouse_devices.clear();
+                }
             }
 
             // Always update to get latest swipe actions
@@ -672,6 +798,7 @@ fn gesture_loop(tx: Sender<GestureMessage>, config: SharedConfig) {
                 .filter_map(|p| {
                     let device = Device::open(p).ok()?;
                     if device.supported_keys()?.contains(required_key) {
+                        set_nonblocking(&device);
                         Some(TouchpadDevice { device })
                     } else {
                         None
@@ -823,13 +950,64 @@ fn gesture_loop(tx: Sender<GestureMessage>, config: SharedConfig) {
                     }
                 }
                 Err(e) => {
-                    // Device might have been disconnected
-                    if e.raw_os_error() == Some(libc::ENODEV) {
+                    let raw = e.raw_os_error();
+                    if raw == Some(libc::ENODEV) {
                         eprintln!("Touchpad disconnected, will rescan...");
                         needs_rescan = true;
                     }
+                    // EAGAIN/EWOULDBLOCK is normal for non-blocking - no events available
                 }
             }
+        }
+
+        // Process events from mouse devices (middle-click trigger)
+        let mut mouse_needs_rescan = false;
+        for mouse in &mut mouse_devices {
+            match mouse.device.fetch_events() {
+                Ok(events) => {
+                    for event in events {
+                        if let InputEventKind::Key(Key::BTN_MIDDLE) = event.kind() {
+                            if event.value() == 1 {
+                                // Button pressed
+                                println!("Middle mouse click - launching menu");
+                                if tx.send(GestureMessage::ShowPieMenu).is_err() {
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    let raw = e.raw_os_error();
+                    if raw == Some(libc::ENODEV) {
+                        eprintln!("Mouse disconnected, will rescan...");
+                        mouse_needs_rescan = true;
+                    }
+                    // EAGAIN/EWOULDBLOCK is normal for non-blocking - no events available
+                }
+            }
+        }
+
+        if mouse_needs_rescan {
+            mouse_devices.clear();
+            last_mouse_scan = Instant::now();
+        }
+
+        // Rescan for mouse devices if none available and middle-click enabled
+        if mouse_devices.is_empty() && current_middle_click && last_mouse_scan.elapsed() > Duration::from_secs(5) {
+            let new_mice: Vec<MouseDevice> = find_mouse_paths()
+                .iter()
+                .filter_map(|p| {
+                    let device = Device::open(p).ok()?;
+                    set_nonblocking(&device);
+                    Some(MouseDevice { device })
+                })
+                .collect();
+            if !new_mice.is_empty() {
+                println!("Rescanned: found {} mouse device(s)", new_mice.len());
+                mouse_devices = new_mice;
+            }
+            last_mouse_scan = Instant::now();
         }
 
         // Check for pending trigger timeout (3-finger mode debounce)
@@ -844,6 +1022,10 @@ fn gesture_loop(tx: Sender<GestureMessage>, config: SharedConfig) {
         if needs_rescan {
             devices.clear();
         }
+
+        // Small sleep to avoid busy-looping with non-blocking I/O
+        // 5ms gives ~200Hz polling which is responsive enough for gestures
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -859,13 +1041,17 @@ pub fn start_gesture_thread(
     tx: Sender<GestureMessage>,
     config: SharedConfig,
 ) -> Result<(), GestureError> {
-    // Read initial finger count from config
+    // Read initial config
     let finger_count = config.read().map(|c| c.finger_count).unwrap_or(4);
+    let middle_click = config.read().map(|c| c.middle_click_trigger).unwrap_or(false);
 
     // Find touchpad devices
-    let paths = find_touchpad_paths(finger_count);
+    let touchpad_paths = find_touchpad_paths(finger_count);
 
-    if paths.is_empty() {
+    // Find mouse devices (if middle-click enabled)
+    let mouse_paths = if middle_click { find_mouse_paths() } else { Vec::new() };
+
+    if touchpad_paths.is_empty() && mouse_paths.is_empty() {
         // Check if it's a permission issue by trying to read /dev/input directly
         match std::fs::read_dir("/dev/input") {
             Ok(mut dir) => {
@@ -889,14 +1075,17 @@ pub fn start_gesture_thread(
         return Err(GestureError::NoTouchpadFound);
     }
 
-    // Try to open first device to check permissions
-    match Device::open(&paths[0]) {
-        Ok(_) => {}
-        Err(e) if e.raw_os_error() == Some(libc::EACCES) => {
-            return Err(GestureError::PermissionDenied(paths[0].display().to_string()));
-        }
-        Err(e) => {
-            return Err(GestureError::DeviceError(e.to_string()));
+    // Try to open first available device to check permissions
+    let first_path = touchpad_paths.first().or(mouse_paths.first());
+    if let Some(path) = first_path {
+        match Device::open(path) {
+            Ok(_) => {}
+            Err(e) if e.raw_os_error() == Some(libc::EACCES) => {
+                return Err(GestureError::PermissionDenied(path.display().to_string()));
+            }
+            Err(e) => {
+                return Err(GestureError::DeviceError(e.to_string()));
+            }
         }
     }
 

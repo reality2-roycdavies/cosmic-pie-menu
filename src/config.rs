@@ -83,6 +83,9 @@ pub struct PieMenuConfig {
     /// Highlight only icon on hover (vs whole segment)
     #[serde(default)]
     pub icon_only_highlight: bool,
+    /// Trigger pie menu on middle mouse click
+    #[serde(default)]
+    pub middle_click_trigger: bool,
 }
 
 fn default_true() -> bool {
@@ -106,6 +109,7 @@ impl Default for PieMenuConfig {
             swipe_right: SwipeAction::None,
             show_background: true,
             icon_only_highlight: false,
+            middle_click_trigger: false,
         }
     }
 }
@@ -163,6 +167,8 @@ pub struct GestureConfig {
     pub swipe_left: SwipeAction,
     /// Action for swipe right
     pub swipe_right: SwipeAction,
+    /// Trigger pie menu on middle mouse click
+    pub middle_click_trigger: bool,
 }
 
 impl Default for GestureConfig {
@@ -182,6 +188,7 @@ impl From<&PieMenuConfig> for GestureConfig {
             swipe_down: config.swipe_down,
             swipe_left: config.swipe_left,
             swipe_right: config.swipe_right,
+            middle_click_trigger: config.middle_click_trigger,
         }
     }
 }

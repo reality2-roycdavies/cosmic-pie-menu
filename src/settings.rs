@@ -42,6 +42,8 @@ pub enum Message {
     ShowBackgroundToggled(bool),
     /// Icon-only highlight toggle
     IconOnlyHighlightToggled(bool),
+    /// Middle-click trigger toggle
+    MiddleClickToggled(bool),
     /// Reset to defaults
     ResetDefaults,
 }
@@ -183,6 +185,10 @@ impl Application for SettingsApp {
                 self.config.icon_only_highlight = enabled;
                 let _ = self.config.save();
             }
+            Message::MiddleClickToggled(enabled) => {
+                self.config.middle_click_trigger = enabled;
+                let _ = self.config.save();
+            }
             Message::ResetDefaults => {
                 self.config = PieMenuConfig::default();
                 self.finger_index = if self.config.finger_count == 3 { 0 } else { 1 };
@@ -248,6 +254,13 @@ impl Application for SettingsApp {
                             .step(50.0)
                             .width(Length::Fill)
                         ),
+                )
+            )
+            .add(
+                settings::item(
+                    "Middle Mouse Click",
+                    widget::toggler(self.config.middle_click_trigger)
+                        .on_toggle(Message::MiddleClickToggled),
                 )
             );
 
