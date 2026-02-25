@@ -219,10 +219,15 @@ fn spawn_pie_menu() {
 
 /// Spawn the settings window as a subprocess
 fn spawn_settings() {
-    println!("Opening settings window...");
-    let exe = std::env::current_exe().unwrap_or_else(|_| "cosmic-pie-menu".into());
-    if let Err(e) = Command::new(exe).arg("--settings").spawn() {
-        eprintln!("Failed to open settings: {}", e);
+    // Try the unified settings app first, fall back to standalone
+    let result = Command::new("cosmic-applet-settings")
+        .arg("pie-menu")
+        .spawn();
+    if result.is_err() {
+        let exe = std::env::current_exe().unwrap_or_else(|_| "cosmic-pie-menu".into());
+        if let Err(e) = Command::new(exe).arg("--settings").spawn() {
+            eprintln!("Failed to open settings: {}", e);
+        }
     }
 }
 
