@@ -14,6 +14,7 @@ mod config;
 mod gesture;
 mod pie_menu;
 mod settings;
+mod settings_page;
 mod windows;
 
 use std::collections::HashMap;

@@ -6,6 +6,14 @@ authors = ["Roy C. Davies"]
 license = "GPL-3.0"
 description = "Pie menu launcher for COSMIC desktop - radial app tray"
 
+[lib]
+name = "cosmic_pie_menu"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cosmic-pie-menu"
+path = "src/main.rs"
+
 [dependencies]
 # COSMIC GUI toolkit - applet feature enables panel integration
 # wgpu needed for pie menu canvas rendering (subprocess mode)
