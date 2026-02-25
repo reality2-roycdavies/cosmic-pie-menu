@@ -219,6 +219,10 @@ fn spawn_pie_menu() {
 
 /// Spawn the settings window as a subprocess
 fn spawn_settings() {
+    // Don't spawn a second instance if already running
+    if let Ok(output) = Command::new("pgrep").arg("-f").arg("cosmic-applet-settings").output() {
+        if output.status.success() { return; }
+    }
     // Try the unified settings app first, fall back to standalone
     let result = Command::new("cosmic-applet-settings")
         .arg("pie-menu")
