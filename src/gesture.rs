@@ -646,7 +646,35 @@ struct MouseDevice {
 }
 
 /// Main gesture detection loop with configurable parameters
+/// Try to acquire an exclusive file lock for gesture detection.
+/// Returns the File (keeping it open holds the lock) or None if already locked.
+fn try_gesture_lock() -> Option<std::fs::File> {
+    let run_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
+    let lock_path = format!("{}/cosmic-pie-menu-gesture.lock", run_dir);
+    let file = std::fs::File::create(&lock_path).ok()?;
+    let fd = file.as_raw_fd();
+    // LOCK_EX | LOCK_NB = exclusive, non-blocking
+    let ret = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    if ret == 0 {
+        Some(file) // Lock acquired — caller must keep file open
+    } else {
+        None // Another instance holds the lock
+    }
+}
+
 fn gesture_loop(tx: Sender<GestureMessage>, config: SharedConfig) {
+    // Acquire a system-wide lock so only one applet instance runs gesture detection.
+    // On multi-monitor setups COSMIC may launch multiple applet processes; without
+    // this lock each one would detect the same touchpad events and spawn duplicate
+    // pie menus.
+    let _lock_file = match try_gesture_lock() {
+        Some(f) => f,
+        None => {
+            println!("Another instance is already handling gestures, skipping.");
+            return;
+        }
+    };
+
     let mut state = GestureState::Idle;
     let mut last_scan = Instant::now();
     let mut last_config_check = Instant::now();

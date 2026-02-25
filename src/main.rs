@@ -18,6 +18,7 @@ mod settings_page;
 mod windows;
 
 use std::collections::HashMap;
+use std::os::unix::io::AsRawFd;
 use std::process::Command;
 
 /// Query running apps via subprocess to avoid Wayland connection conflicts
@@ -70,12 +71,32 @@ fn load_all_pie_apps() -> Vec<apps::AppInfo> {
     all_apps
 }
 
+/// Try to acquire an exclusive lock for a subprocess mode (track/pie).
+/// Prevents duplicate subprocesses on multi-monitor setups.
+fn try_subprocess_lock(name: &str) -> Option<std::fs::File> {
+    let run_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
+    let lock_path = format!("{}/cosmic-pie-menu-{}.lock", run_dir, name);
+    let file = std::fs::File::create(&lock_path).ok()?;
+    let fd = file.as_raw_fd();
+    let ret = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    if ret == 0 {
+        Some(file)
+    } else {
+        None
+    }
+}
+
 fn main() -> cosmic::iced::Result {
     let args: Vec<String> = std::env::args().collect();
 
     // Internal: --pie-at X Y, show the pie menu at a specific position (used by gesture system)
     if let Some(pos) = args.iter().position(|a| a == "--pie-at") {
         if args.len() > pos + 2 {
+            // Singleton: only one pie menu at a time
+            let _lock = match try_subprocess_lock("pie") {
+                Some(f) => f,
+                None => return Ok(()),
+            };
             let x: f32 = args[pos + 1].parse().unwrap_or(0.0);
             let y: f32 = args[pos + 2].parse().unwrap_or(0.0);
             let apps = load_all_pie_apps();
@@ -86,6 +107,11 @@ fn main() -> cosmic::iced::Result {
 
     // Internal: --track flag, use cursor tracking to position the menu (used by gesture system)
     if args.contains(&"--track".to_string()) {
+        // Singleton: only one tracker at a time (prevents duplicates on multi-monitor)
+        let _lock = match try_subprocess_lock("track") {
+            Some(f) => f,
+            None => return Ok(()),
+        };
         let apps = load_all_pie_apps();
         pie_menu::show_pie_menu_with_tracking(apps);
         return Ok(());
