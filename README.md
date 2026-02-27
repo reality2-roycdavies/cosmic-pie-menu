@@ -18,6 +18,8 @@ This is the third project in a series exploring human-AI collaboration for COSMI
 2. [cosmic-runkat](https://github.com/reality2-roycdavies/cosmic-runkat) - Animated CPU monitor tray icon
 3. **cosmic-pie-menu** (this project) - Radial app launcher
 
+See [Related COSMIC Applets](#related-cosmic-applets) for the full suite.
+
 All three projects serve as case studies in AI-assisted software development, with complete documentation of the process.
 
 ## Features
@@ -364,6 +366,20 @@ The iterative development process demonstrated effective human-AI collaboration:
 2. **Platform discovery** - AI suggests approaches, real-world testing reveals actual behavior
 3. **Scope flexibility** - Features like cursor-position menus were descoped when complexity exceeded value
 4. **Accumulated learning** - Solutions from previous projects (ksni tray, layer-shell, config paths) were directly reusable
+
+## Related COSMIC Applets
+
+This is part of a suite of custom applets for the COSMIC desktop:
+
+| Applet | Description |
+|--------|-------------|
+| **[cosmic-applet-settings](https://github.com/reality2-roycdavies/cosmic-applet-settings)** | Unified settings app for all custom COSMIC applets |
+| **[cosmic-runkat](https://github.com/reality2-roycdavies/cosmic-runkat)** | Animated running cat CPU indicator for the panel |
+| **[cosmic-bing-wallpaper](https://github.com/reality2-roycdavies/cosmic-bing-wallpaper)** | Daily Bing wallpaper manager with auto-update |
+| **[cosmic-tailscale](https://github.com/reality2-roycdavies/cosmic-tailscale)** | Tailscale VPN status and control applet |
+| **[cosmic-hotspot](https://github.com/reality2-roycdavies/cosmic-hotspot)** | WiFi hotspot toggle applet |
+| **[cosmic-konnect](https://github.com/reality2-roycdavies/cosmic-konnect)** | Device connectivity and sync between Linux and Android |
+| **[cosmic-konnect-android](https://github.com/reality2-roycdavies/cosmic-konnect-android)** | Android companion app for Cosmic Konnect |
 
 ## License
 
