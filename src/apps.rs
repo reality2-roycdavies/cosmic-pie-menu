@@ -40,7 +40,7 @@ fn desktop_file_dirs() -> Vec<PathBuf> {
         dirs.push(data_dir.join("applications"));
     }
 
-    // Flatpak applications
+    // Flatpak-installed applications
     dirs.push(PathBuf::from("/var/lib/flatpak/exports/share/applications"));
     if let Some(home) = dirs::home_dir() {
         dirs.push(home.join(".local/share/flatpak/exports/share/applications"));
