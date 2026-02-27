@@ -83,6 +83,34 @@ const ICON_HOVER_OFFSET: f32 = 25.0;
 /// Animation speed for icon hover (0.0 to 1.0 per tick, higher = faster)
 const ICON_ANIMATION_SPEED: f32 = 0.25;
 
+/// Rubber band effect: radial offset targets for neighbors by distance from hovered icon
+/// Index 0 = hovered icon itself, 1 = immediate neighbor, 2 = next neighbor
+const RUBBER_BAND_RADIAL: &[f32] = &[1.0, 0.4, 0.12];
+
+/// Rubber band effect: angular pull (radians) for immediate neighbor at full animation
+/// Neighbors get pulled toward the hovered icon as if connected by a rubber band
+const RUBBER_BAND_ANGULAR_PULL: f32 = 0.06;
+
+/// Rubber band effect: angular pull falloff per distance step
+const RUBBER_BAND_ANGULAR_FALLOFF: &[f32] = &[0.0, 1.0, 0.35];
+
+/// Calculate shortest circular distance between two indices in a ring of n elements
+fn circular_distance(a: usize, b: usize, n: usize) -> usize {
+    if n == 0 { return 0; }
+    let forward = (b + n - a) % n;
+    let backward = (a + n - b) % n;
+    forward.min(backward)
+}
+
+/// Calculate direction from index `from` toward index `toward` in a ring of n elements
+/// Returns -1.0 if `toward` is counter-clockwise, +1.0 if clockwise, 0.0 if same
+fn circular_direction(from: usize, toward: usize, n: usize) -> f32 {
+    if n == 0 || from == toward { return 0.0; }
+    let forward = (toward + n - from) % n;
+    let backward = (from + n - toward) % n;
+    if forward <= backward { 1.0 } else { -1.0 }
+}
+
 /// Theme colors for the pie menu
 /// Integrates with COSMIC theme system for consistent colors
 struct PieTheme {
@@ -459,10 +487,20 @@ impl PieMenuApp {
                 // Keep ticking for a bit to trigger layout recalculation on scaled displays
                 self.tick_count += 1;
 
-                // Animate hover offsets for smooth icon movement
+                // Animate hover offsets for smooth icon movement (rubber band effect)
                 if self.icon_only_highlight {
+                    let n = self.hover_offsets.len();
                     for (i, offset) in self.hover_offsets.iter_mut().enumerate() {
-                        let target = if self.hovered_slice == Some(i) { 1.0 } else { 0.0 };
+                        let target = if let Some(hovered) = self.hovered_slice {
+                            let dist = circular_distance(i, hovered, n);
+                            if dist < RUBBER_BAND_RADIAL.len() {
+                                RUBBER_BAND_RADIAL[dist]
+                            } else {
+                                0.0
+                            }
+                        } else {
+                            0.0
+                        };
                         if (*offset - target).abs() > 0.01 {
                             *offset += (target - *offset) * ICON_ANIMATION_SPEED;
                         } else {
@@ -822,16 +860,34 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                 let base_icon_radius = calculate_icon_radius(self.menu_radius, self.inner_radius, self.slices.len());
 
                 // In icon_only_highlight mode, smoothly animate icon outward when hovered
+                // Rubber band effect: hovered icon moves out, neighbors get pulled out and toward it
                 let hover_offset = self.hover_offsets.get(slice.index).copied().unwrap_or(0.0);
-                let icon_radius = if self.icon_only_highlight {
-                    base_icon_radius + ICON_HOVER_OFFSET * hover_offset
+                let (icon_radius, draw_angle) = if self.icon_only_highlight {
+                    let radial = base_icon_radius + ICON_HOVER_OFFSET * hover_offset;
+
+                    // Angular pull: neighbors get pulled toward the hovered icon
+                    let angular = if let Some(hovered_idx) = self.hovered {
+                        let n = self.slices.len();
+                        let dist = circular_distance(slice.index, hovered_idx, n);
+                        if dist > 0 && dist < RUBBER_BAND_ANGULAR_FALLOFF.len() {
+                            let direction = circular_direction(slice.index, hovered_idx, n);
+                            let falloff = RUBBER_BAND_ANGULAR_FALLOFF[dist];
+                            direction * RUBBER_BAND_ANGULAR_PULL * falloff * hover_offset
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        0.0
+                    };
+
+                    (radial, slice.angle + angular)
                 } else {
-                    base_icon_radius
+                    (base_icon_radius, slice.angle)
                 };
 
                 let icon_center = Point::new(
-                    center.x + icon_radius * slice.angle.cos(),
-                    center.y + icon_radius * slice.angle.sin(),
+                    center.x + icon_radius * draw_angle.cos(),
+                    center.y + icon_radius * draw_angle.sin(),
                 );
 
                 let icon_size = ICON_SIZE as f32;
