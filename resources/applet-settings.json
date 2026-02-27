@@ -1,0 +1,6 @@
+{
+    "name": "Pie Menu",
+    "icon": "io.github.reality2_roycdavies.cosmic-pie-menu-symbolic",
+    "applet_id": "io.github.reality2_roycdavies.cosmic-pie-menu",
+    "settings_cmd": "cosmic-pie-menu --settings-standalone"
+}

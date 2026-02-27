@@ -117,8 +117,22 @@ fn main() -> cosmic::iced::Result {
         return Ok(());
     }
 
-    // Internal: --settings flag, show the settings window
+    // --settings: try the unified settings hub first, fall back to standalone
     if args.contains(&"--settings".to_string()) {
+        use std::process::Command;
+        if Command::new("cosmic-applet-settings")
+            .arg("io.github.reality2_roycdavies.cosmic-pie-menu")
+            .spawn()
+            .is_ok()
+        {
+            return Ok(());
+        }
+        settings::run_settings(None);
+        return Ok(());
+    }
+
+    // --settings-standalone: always open standalone settings window
+    if args.contains(&"--settings-standalone".to_string()) {
         settings::run_settings(None);
         return Ok(());
     }
