@@ -106,18 +106,41 @@ mv cosmic-pie-menu ~/.local/bin/
 
 ### From Source
 
+You will also need [just](https://github.com/casey/just) (command runner):
+
+```bash
+# Debian/Ubuntu/Pop!_OS
+sudo apt install just
+
+# Fedora
+sudo dnf install just
+
+# Arch
+sudo pacman -S just
+```
+
 ```bash
 # Clone the repository
 git clone https://github.com/reality2-roycdavies/cosmic-pie-menu.git
 cd cosmic-pie-menu
 
-# Build in release mode
-cargo build --release
+# Build release binary
+just build-release
 
-# Install binary, desktop entry, and icon
-sudo cp target/release/cosmic-pie-menu /usr/local/bin/
-sudo cp resources/io.github.reality2_roycdavies.cosmic-pie-menu.desktop /usr/share/applications/
-sudo cp resources/io.github.reality2_roycdavies.cosmic-pie-menu-symbolic.svg /usr/share/icons/hicolor/symbolic/apps/
+# Install binary, desktop entry, and icon to ~/.local
+just install-local
+```
+
+#### Other just commands
+
+```bash
+just build-debug       # Debug build
+just run               # Build debug and run
+just run-release       # Build release and run
+just check             # Run clippy checks
+just fmt               # Format code
+just clean             # Clean build artifacts
+just uninstall-local   # Remove installed files
 ```
 
 Then add the applet to your COSMIC panel via **Settings → Desktop → Panel → Applets**.

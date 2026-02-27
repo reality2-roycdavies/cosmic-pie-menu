@@ -51,6 +51,8 @@ install-local:
     cp resources/{{appid}}.desktop ~/.local/share/applications/
 
     # Install icons
+    mkdir -p ~/.local/share/icons/hicolor/scalable/apps
+    cp resources/{{appid}}.svg ~/.local/share/icons/hicolor/scalable/apps/
     mkdir -p ~/.local/share/icons/hicolor/symbolic/apps
     cp resources/{{appid}}-symbolic.svg ~/.local/share/icons/hicolor/symbolic/apps/
 
@@ -61,6 +63,7 @@ install-local:
 uninstall-local:
     rm -f ~/.local/bin/{{name}}
     rm -f ~/.local/share/applications/{{appid}}.desktop
+    rm -f ~/.local/share/icons/hicolor/scalable/apps/{{appid}}.svg
     rm -f ~/.local/share/icons/hicolor/symbolic/apps/{{appid}}-symbolic.svg
 
 # Build and run

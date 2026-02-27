@@ -1,0 +1,22 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Pie Menu desktop icon: radial dots matching symbolic -->
+  <rect width="64" height="64" rx="12" fill="#2B2B2B"/>
+  <!-- Center dot -->
+  <circle cx="32" cy="32" r="5.5" fill="white"/>
+  <!-- Top -->
+  <circle cx="32" cy="12" r="4" fill="white"/>
+  <!-- Top-right -->
+  <circle cx="46.1" cy="17.9" r="4" fill="white"/>
+  <!-- Right -->
+  <circle cx="52" cy="32" r="4" fill="white"/>
+  <!-- Bottom-right -->
+  <circle cx="46.1" cy="46.1" r="4" fill="white"/>
+  <!-- Bottom -->
+  <circle cx="32" cy="52" r="4" fill="white"/>
+  <!-- Bottom-left -->
+  <circle cx="17.9" cy="46.1" r="4" fill="white"/>
+  <!-- Left -->
+  <circle cx="12" cy="32" r="4" fill="white"/>
+  <!-- Top-left -->
+  <circle cx="17.9" cy="17.9" r="4" fill="white"/>
+</svg>
