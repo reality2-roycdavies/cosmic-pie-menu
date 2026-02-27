@@ -219,17 +219,13 @@ fn spawn_pie_menu() {
 
 /// Spawn the settings window as a subprocess
 fn spawn_settings() {
-    // Don't spawn a second instance if already running
-    if let Ok(output) = Command::new("pgrep").arg("-f").arg("cosmic-applet-settings").output() {
-        if output.status.success() { return; }
-    }
-    // Try the unified settings app first, fall back to standalone
-    let result = Command::new("cosmic-applet-settings")
-        .arg("pie-menu")
+    // Try unified settings hub first, fall back to standalone
+    let unified = Command::new("cosmic-applet-settings")
+        .arg(APP_ID)
         .spawn();
-    if result.is_err() {
+    if unified.is_err() {
         let exe = std::env::current_exe().unwrap_or_else(|_| "cosmic-pie-menu".into());
-        if let Err(e) = Command::new(exe).arg("--settings").spawn() {
+        if let Err(e) = Command::new(exe).arg("--settings-standalone").spawn() {
             eprintln!("Failed to open settings: {}", e);
         }
     }
