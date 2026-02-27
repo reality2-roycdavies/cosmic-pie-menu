@@ -5,6 +5,10 @@ edition = "2021"
 authors = ["Roy C. Davies"]
 license = "GPL-3.0"
 description = "Pie menu launcher for COSMIC desktop - radial app tray"
+keywords = ["cosmic-desktop", "pie-menu", "app-launcher", "wayland", "linux"]
+categories = ["gui"]
+repository = "https://github.com/reality2-roycdavies/cosmic-pie-menu"
+homepage = "https://github.com/reality2-roycdavies/cosmic-pie-menu"
 
 [lib]
 name = "cosmic_pie_menu"
