@@ -14,6 +14,7 @@ mod config;
 mod gesture;
 mod pie_menu;
 mod settings;
+mod settings_cli;
 mod settings_page;
 mod windows;
 
@@ -134,6 +135,30 @@ fn main() -> cosmic::iced::Result {
     // --settings-standalone: always open standalone settings window
     if args.contains(&"--settings-standalone".to_string()) {
         settings::run_settings(None);
+        return Ok(());
+    }
+
+    // CLI settings protocol
+    if args.contains(&"--settings-describe".to_string()) {
+        settings_cli::describe();
+        return Ok(());
+    }
+    if args.contains(&"--settings-set".to_string()) {
+        if args.len() < 4 {
+            eprintln!("Usage: cosmic-pie-menu --settings-set <key> <json_value>");
+            std::process::exit(1);
+        }
+        let key_idx = args.iter().position(|a| a == "--settings-set").unwrap() + 1;
+        settings_cli::set(&args[key_idx], &args[key_idx + 1]);
+        return Ok(());
+    }
+    if args.contains(&"--settings-action".to_string()) {
+        if args.len() < 3 {
+            eprintln!("Usage: cosmic-pie-menu --settings-action <action_id>");
+            std::process::exit(1);
+        }
+        let id_idx = args.iter().position(|a| a == "--settings-action").unwrap() + 1;
+        settings_cli::action(&args[id_idx]);
         return Ok(());
     }
 
