@@ -31,9 +31,6 @@ use crate::apps::{AppInfo, find_icon_path};
 use crate::config::PieMenuConfig;
 use crate::windows;
 
-/// Icon size for the pie menu
-const ICON_SIZE: u16 = 48;
-
 /// Minimum radius of the pie menu circle (for small number of apps)
 const MIN_MENU_RADIUS: f32 = 80.0;
 
@@ -43,19 +40,16 @@ const MIN_INNER_RADIUS: f32 = 40.0;
 /// Ratio of inner radius to menu radius (for proportional scaling)
 const INNER_RADIUS_RATIO: f32 = 0.4;
 
-/// Spacing between icons on the circumference (reduced for tighter layout)
-const ICON_SPACING: f32 = 75.0;
-
 /// Calculate menu radius based on number of apps
 /// Ensures icons have enough space around the circle
-fn calculate_menu_radius(num_apps: usize) -> f32 {
+fn calculate_menu_radius(num_apps: usize, icon_spacing: f32) -> f32 {
     if num_apps == 0 {
         return MIN_MENU_RADIUS;
     }
     // Circumference needed = num_apps * spacing
     // Circumference = 2 * PI * radius
     // So radius = (num_apps * spacing) / (2 * PI)
-    let calculated = (num_apps as f32 * ICON_SPACING) / (2.0 * PI);
+    let calculated = (num_apps as f32 * icon_spacing) / (2.0 * PI);
     calculated.max(MIN_MENU_RADIUS)
 }
 
@@ -76,12 +70,6 @@ fn calculate_icon_radius(menu_radius: f32, inner_radius: f32, _num_apps: usize) 
     // Place icons at 65% from inner to outer (biased toward outer edge)
     segment_inner + (segment_outer - segment_inner) * 0.65
 }
-
-/// Offset to move icon outward when hovered in icon_only_highlight mode
-const ICON_HOVER_OFFSET: f32 = 25.0;
-
-/// Animation speed for icon hover (0.0 to 1.0 per tick, higher = faster)
-const ICON_ANIMATION_SPEED: f32 = 0.25;
 
 /// Rubber band effect: radial offset targets for neighbors by distance from hovered icon
 /// Index 0 = hovered icon itself, 1 = immediate neighbor, 2 = next neighbor
@@ -251,7 +239,7 @@ pub enum PieCanvasMessage {
 /// Create a tinted glow SVG handle for an icon
 /// For SVGs: injects a color filter into the SVG content
 /// For raster images: wraps in an SVG with the image base64-encoded and filtered
-fn create_glow_handle(icon_path: &PathBuf, glow_color: &Color) -> Option<SvgHandle> {
+fn create_glow_handle(icon_path: &PathBuf, glow_color: &Color, icon_size: u16) -> Option<SvgHandle> {
     use base64::Engine;
 
     let r = (glow_color.r * 255.0) as u8;
@@ -291,7 +279,7 @@ fn create_glow_handle(icon_path: &PathBuf, glow_color: &Color) -> Option<SvgHand
             _ => "image/png",
         };
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-        let size = ICON_SIZE;
+        let size = icon_size;
         let wrapper = format!(
             r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{size}" height="{size}">{filter}<image href="data:{mime};base64,{b64}" width="{size}" height="{size}" filter="url(#gc)"/></svg>"#,
             size = size,
@@ -333,15 +321,21 @@ struct PieMenuApp {
     icon_only_highlight: bool,
     /// Animation state: current hover offset for each slice (0.0 to 1.0)
     hover_offsets: Vec<f32>,
+    /// Configurable icon size
+    icon_size: u16,
+    /// Configurable hover offset distance
+    hover_offset: f32,
+    /// Configurable animation speed
+    animation_speed: f32,
 }
 
 impl PieMenuApp {
     fn new_at(apps: Vec<AppInfo>, position: Option<(f32, f32)>) -> (Self, Task<Message>) {
-        let menu_radius = calculate_menu_radius(apps.len());
-        let inner_radius = calculate_inner_radius(menu_radius);
-
-        // Load theme settings from config
+        // Load config for all settings
         let config = PieMenuConfig::load();
+        let icon_size = config.icon_size;
+        let menu_radius = calculate_menu_radius(apps.len(), config.icon_spacing);
+        let inner_radius = calculate_inner_radius(menu_radius);
 
         let mut settings = SctkLayerSurfaceSettings::default();
         settings.keyboard_interactivity = KeyboardInteractivity::OnDemand;
@@ -370,11 +364,11 @@ impl PieMenuApp {
                 let end_angle = angle + slice_angle / 2.0;
 
                 let icon_path = app.icon.as_ref()
-                    .and_then(|name| find_icon_path(name, ICON_SIZE));
+                    .and_then(|name| find_icon_path(name, icon_size));
 
                 // Pre-create tinted glow handle if icon_only_highlight is enabled
                 let glow_handle = if config.icon_only_highlight {
-                    icon_path.as_ref().and_then(|p| create_glow_handle(p, &glow_color))
+                    icon_path.as_ref().and_then(|p| create_glow_handle(p, &glow_color, icon_size))
                 } else {
                     None
                 };
@@ -404,6 +398,9 @@ impl PieMenuApp {
             show_background: config.show_background,
             icon_only_highlight: config.icon_only_highlight,
             hover_offsets: vec![0.0; num_slices],
+            icon_size,
+            hover_offset: config.hover_offset,
+            animation_speed: config.animation_speed,
         };
 
         (app, get_layer_surface(settings))
@@ -502,7 +499,7 @@ impl PieMenuApp {
                             0.0
                         };
                         if (*offset - target).abs() > 0.01 {
-                            *offset += (target - *offset) * ICON_ANIMATION_SPEED;
+                            *offset += (target - *offset) * self.animation_speed;
                         } else {
                             *offset = target;
                         }
@@ -546,6 +543,8 @@ impl PieMenuApp {
             show_background: self.show_background,
             icon_only_highlight: self.icon_only_highlight,
             hover_offsets: &self.hover_offsets,
+            icon_size: self.icon_size,
+            hover_offset: self.hover_offset,
         });
 
         // Always full-screen mode for reliable layer surface behavior
@@ -579,6 +578,10 @@ struct PieCanvas<'a> {
     icon_only_highlight: bool,
     /// Animated hover offsets for each slice (0.0 = not hovered, 1.0 = fully hovered)
     hover_offsets: &'a [f32],
+    /// Configurable icon size
+    icon_size: u16,
+    /// Configurable hover offset distance
+    hover_offset: f32,
 }
 
 impl<'a> Program<Message> for PieCanvas<'a> {
@@ -595,7 +598,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
             return (canvas::event::Status::Ignored, None);
         };
 
-        let menu_size = self.menu_radius * 2.0 + ICON_SIZE as f32 + 80.0;
+        let menu_size = self.menu_radius * 2.0 + self.icon_size as f32 + 80.0;
 
         // Determine center point: cursor position or center of bounds
         let center = if let Some((cx, cy)) = self.cursor_position {
@@ -712,7 +715,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        let menu_size = self.menu_radius * 2.0 + ICON_SIZE as f32 + 80.0;
+        let menu_size = self.menu_radius * 2.0 + self.icon_size as f32 + 80.0;
 
         use cosmic::iced::widget::canvas::Frame;
         let mut frame = Frame::new(renderer, bounds.size());
@@ -863,7 +866,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                 // Rubber band effect: hovered icon moves out, neighbors get pulled out and toward it
                 let hover_offset = self.hover_offsets.get(slice.index).copied().unwrap_or(0.0);
                 let (icon_radius, draw_angle) = if self.icon_only_highlight {
-                    let radial = base_icon_radius + ICON_HOVER_OFFSET * hover_offset;
+                    let radial = base_icon_radius + self.hover_offset * hover_offset;
 
                     // Angular pull: neighbors get pulled toward the hovered icon
                     let angular = if let Some(hovered_idx) = self.hovered {
@@ -890,7 +893,7 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                     center.y + icon_radius * draw_angle.sin(),
                 );
 
-                let icon_size = ICON_SIZE as f32;
+                let icon_size = self.icon_size as f32;
 
                 // Draw icon-shaped glow effect when in icon_only_highlight mode
                 // Uses pre-created tinted SVG handles drawn at progressively larger sizes

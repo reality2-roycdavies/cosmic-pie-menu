@@ -86,6 +86,18 @@ pub struct PieMenuConfig {
     /// Trigger pie menu on middle mouse click
     #[serde(default)]
     pub middle_click_trigger: bool,
+    /// Icon size in pixels
+    #[serde(default = "default_icon_size")]
+    pub icon_size: u16,
+    /// Spacing between icons on the circumference
+    #[serde(default = "default_icon_spacing")]
+    pub icon_spacing: f32,
+    /// How far the selected icon pushes outward on hover
+    #[serde(default = "default_hover_offset")]
+    pub hover_offset: f32,
+    /// Animation speed for hover effects (0.05 = slow, 0.5 = fast)
+    #[serde(default = "default_animation_speed")]
+    pub animation_speed: f32,
 }
 
 fn default_true() -> bool {
@@ -94,6 +106,22 @@ fn default_true() -> bool {
 
 fn default_swipe_threshold() -> i32 {
     300
+}
+
+fn default_icon_size() -> u16 {
+    48
+}
+
+fn default_icon_spacing() -> f32 {
+    75.0
+}
+
+fn default_hover_offset() -> f32 {
+    25.0
+}
+
+fn default_animation_speed() -> f32 {
+    0.25
 }
 
 impl Default for PieMenuConfig {
@@ -110,6 +138,10 @@ impl Default for PieMenuConfig {
             show_background: true,
             icon_only_highlight: false,
             middle_click_trigger: false,
+            icon_size: 48,
+            icon_spacing: 75.0,
+            hover_offset: 25.0,
+            animation_speed: 0.25,
         }
     }
 }

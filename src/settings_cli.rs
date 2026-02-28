@@ -124,6 +124,46 @@ pub fn describe() {
                         "key": "icon_only_highlight",
                         "label": "Icon-Only Highlight",
                         "value": config.icon_only_highlight
+                    },
+                    {
+                        "type": "slider",
+                        "key": "icon_size",
+                        "label": "Icon Size",
+                        "value": config.icon_size as f64,
+                        "min": 24.0,
+                        "max": 96.0,
+                        "step": 4.0,
+                        "unit": "px"
+                    },
+                    {
+                        "type": "slider",
+                        "key": "icon_spacing",
+                        "label": "Icon Spacing",
+                        "value": config.icon_spacing as f64,
+                        "min": 50.0,
+                        "max": 120.0,
+                        "step": 5.0,
+                        "unit": ""
+                    },
+                    {
+                        "type": "slider",
+                        "key": "hover_offset",
+                        "label": "Selection Offset",
+                        "value": config.hover_offset as f64,
+                        "min": 0.0,
+                        "max": 60.0,
+                        "step": 5.0,
+                        "unit": "px"
+                    },
+                    {
+                        "type": "slider",
+                        "key": "animation_speed",
+                        "label": "Animation Speed",
+                        "value": config.animation_speed as f64,
+                        "min": 0.05,
+                        "max": 0.5,
+                        "step": 0.05,
+                        "unit": ""
                     }
                 ]
             }
@@ -209,6 +249,30 @@ pub fn set(key: &str, value: &str) {
                     .map_err(|e| format!("Invalid boolean: {e}"))?;
                 config.icon_only_highlight = v;
                 Ok("Updated icon-only highlight")
+            }
+            "icon_size" => {
+                let v: f64 = serde_json::from_str(value)
+                    .map_err(|e| format!("Invalid number: {e}"))?;
+                config.icon_size = v as u16;
+                Ok("Updated icon size")
+            }
+            "icon_spacing" => {
+                let v: f64 = serde_json::from_str(value)
+                    .map_err(|e| format!("Invalid number: {e}"))?;
+                config.icon_spacing = v as f32;
+                Ok("Updated icon spacing")
+            }
+            "hover_offset" => {
+                let v: f64 = serde_json::from_str(value)
+                    .map_err(|e| format!("Invalid number: {e}"))?;
+                config.hover_offset = v as f32;
+                Ok("Updated selection offset")
+            }
+            "animation_speed" => {
+                let v: f64 = serde_json::from_str(value)
+                    .map_err(|e| format!("Invalid number: {e}"))?;
+                config.animation_speed = v as f32;
+                Ok("Updated animation speed")
             }
             _ => Err(format!("Unknown key: {key}")),
         }
