@@ -9,6 +9,9 @@ A radial/pie menu app launcher for the [COSMIC desktop environment](https://syst
 |:----------:|:-----------:|
 | ![Dark Theme](screenshots/dark-theme.png) | ![Light Theme](screenshots/light-theme.png) |
 
+![Pie Menu settings in cosmic-applet-settings hub](screenshots/settings-inline.png)
+*Pie Menu settings in the cosmic-applet-settings hub*
+
 ## About This Project
 
 This project was developed collaboratively between **Dr. Roy C. Davies** and **Claude** (Anthropic's AI assistant) using [Claude Code](https://claude.ai/claude-code). The entire application—from initial concept to working release—was built through natural language conversation.
