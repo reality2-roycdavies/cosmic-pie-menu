@@ -68,6 +68,9 @@ libc = "0.2"
 # Base64 encoding for embedding raster images in SVG glow handles
 base64 = "0.22"
 
+# Async stream for gesture event subscription
+async-stream = "0.3"
+
 [profile.release]
 lto = true
 codegen-units = 1

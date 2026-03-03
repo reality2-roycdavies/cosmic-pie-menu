@@ -10,13 +10,11 @@ use cosmic::app::Core;
 use cosmic::iced::platform_specific::shell::commands::popup::{destroy_popup, get_popup};
 use cosmic::iced::window::Id;
 use cosmic::iced::Limits;
-use cosmic::iced::{time, Subscription, Task};
+use cosmic::iced::{Subscription, Task};
 use cosmic::iced_runtime::core::window;
 use cosmic::{Action, Element};
 use std::process::Command;
-use std::sync::mpsc;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 
 use crate::config::{GestureConfig, PieMenuConfig};
 
@@ -36,8 +34,8 @@ pub enum GestureMessage {
 /// Applet UI messages
 #[derive(Debug, Clone)]
 pub enum Message {
-    /// Poll for gesture events from the background thread
-    PollGestureEvents,
+    /// A gesture event arrived from the background thread
+    GestureEvent(GestureMessage),
     /// Show the pie menu (from gesture or popup button)
     ShowPieMenu,
     /// Toggle the popup menu
@@ -51,7 +49,7 @@ pub enum Message {
 pub struct PieMenuApplet {
     core: Core,
     popup: Option<Id>,
-    gesture_rx: mpsc::Receiver<GestureMessage>,
+    gesture_rx: Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<GestureMessage>>>,
     gesture_active: bool,
 }
 
@@ -74,10 +72,24 @@ impl cosmic::Application for PieMenuApplet {
         let shared_config: Arc<RwLock<GestureConfig>> =
             Arc::new(RwLock::new(GestureConfig::from(&pie_config)));
 
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         // Start gesture detection in background thread
-        match crate::gesture::start_gesture_thread(tx, shared_config) {
+        // The gesture thread uses std::sync::mpsc internally, bridge to tokio channel
+        let std_tx = {
+            let tx = tx.clone();
+            let (std_tx, std_rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                while let Ok(msg) = std_rx.recv() {
+                    if tx.send(msg).is_err() {
+                        break;
+                    }
+                }
+            });
+            std_tx
+        };
+
+        match crate::gesture::start_gesture_thread(std_tx, shared_config) {
             Ok(()) => println!(
                 "Gesture detection started ({}-finger tap)",
                 pie_config.finger_count
@@ -88,7 +100,7 @@ impl cosmic::Application for PieMenuApplet {
         let applet = PieMenuApplet {
             core,
             popup: None,
-            gesture_rx: rx,
+            gesture_rx: Arc::new(tokio::sync::Mutex::new(rx)),
             gesture_active: false,
         };
 
@@ -104,26 +116,33 @@ impl cosmic::Application for PieMenuApplet {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        // Poll gesture channel every 100ms
-        time::every(Duration::from_millis(100)).map(|_| Message::PollGestureEvents)
+        // Only emit messages when a gesture event actually arrives (no polling)
+        let rx = self.gesture_rx.clone();
+        Subscription::run_with_id("gesture-events", async_stream::stream! {
+            let mut rx = rx.lock().await;
+            loop {
+                match rx.recv().await {
+                    Some(msg) => yield msg,
+                    None => break,
+                }
+            }
+        })
+        .map(Message::GestureEvent)
     }
 
     fn update(&mut self, message: Self::Message) -> Task<Action<Self::Message>> {
         match message {
-            Message::PollGestureEvents => {
-                // Drain all pending gesture messages
-                while let Ok(gesture_msg) = self.gesture_rx.try_recv() {
-                    match gesture_msg {
-                        GestureMessage::ShowPieMenu => {
-                            self.gesture_active = false;
-                            spawn_pie_menu();
-                        }
-                        GestureMessage::FingersDown => {
-                            self.gesture_active = true;
-                        }
-                        GestureMessage::Reset => {
-                            self.gesture_active = false;
-                        }
+            Message::GestureEvent(gesture_msg) => {
+                match gesture_msg {
+                    GestureMessage::ShowPieMenu => {
+                        self.gesture_active = false;
+                        spawn_pie_menu();
+                    }
+                    GestureMessage::FingersDown => {
+                        self.gesture_active = true;
+                    }
+                    GestureMessage::Reset => {
+                        self.gesture_active = false;
                     }
                 }
             }
