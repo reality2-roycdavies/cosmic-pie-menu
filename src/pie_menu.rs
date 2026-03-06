@@ -444,9 +444,6 @@ impl PieMenuApp {
                 Task::none()
             }
             Message::CanvasEvent(PieCanvasMessage::ClickSegment(index)) => {
-                self.update(Message::LaunchApp(index))
-            }
-            Message::CanvasEvent(PieCanvasMessage::RightClickSegment(index)) => {
                 if let Some(app) = self.apps.get(index) {
                     if app.running_count > 0 {
                         // Switch to existing window
@@ -470,6 +467,9 @@ impl PieMenuApp {
                     }
                 }
                 Task::none()
+            }
+            Message::CanvasEvent(PieCanvasMessage::RightClickSegment(index)) => {
+                self.update(Message::LaunchApp(index))
             }
             Message::CanvasEvent(PieCanvasMessage::ClickCenter) => {
                 self.update(Message::Close)
