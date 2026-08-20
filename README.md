@@ -152,7 +152,7 @@ Then add the applet to your COSMIC panel via **Settings → Desktop → Panel �
 
 ### Dependencies
 
-- Rust 1.75 or later
+- Rust 1.93 or later (required by the pinned libcosmic)
 - COSMIC desktop environment (or libcosmic)
 - Access to `/dev/input/` (for gesture detection - requires `input` group membership)
 
