@@ -158,7 +158,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         .add(
             settings::flex_item(
                 "Tap Duration",
-                widget::row()
+                widget::Row::new()
                     .spacing(8)
                     .align_y(cosmic::iced::Alignment::Center)
                     .push(text::body(format!("{}ms", state.config.tap_duration_ms)))
@@ -176,7 +176,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
         .add(
             settings::flex_item(
                 "Movement Threshold",
-                widget::row()
+                widget::Row::new()
                     .spacing(8)
                     .align_y(cosmic::iced::Alignment::Center)
                     .push(text::body(format!("{} units", state.config.tap_movement)))
@@ -263,7 +263,7 @@ pub fn view(state: &State) -> Element<'_, Message> {
     swipe_section = swipe_section.add(
         settings::flex_item(
             "Swipe Threshold",
-            widget::row()
+            widget::Row::new()
                 .spacing(8)
                 .align_y(cosmic::iced::Alignment::Center)
                 .push(text::body(format!("{} units", state.config.swipe_threshold)))

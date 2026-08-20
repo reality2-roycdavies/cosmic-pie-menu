@@ -9,8 +9,8 @@
 use cosmic::iced::widget::canvas;
 use cosmic::iced::widget::canvas::{Event, Geometry, Path, Program, Stroke, Text};
 use cosmic::iced::{Color, Font, Point, Rectangle, Renderer, Theme, mouse};
-use cosmic::iced_core::svg::{Handle as SvgHandle, Svg};
-use cosmic::iced_core::image::{Handle as ImageHandle, Image};
+use cosmic::iced::core::svg::{Handle as SvgHandle, Svg};
+use cosmic::iced::core::image::{Handle as ImageHandle, Image};
 use cosmic::iced::window::Id;
 use cosmic::iced::{Element, Length, Task, Subscription};
 use cosmic::iced::alignment::{Horizontal, Vertical};
@@ -135,7 +135,7 @@ impl PieTheme {
         let cosmic = theme.cosmic();
 
         // Use background container for the pie menu (matches dock/panel colors)
-        let bg = &cosmic.background;
+        let bg = cosmic.background(false);
         let accent = &cosmic.accent;
 
         // Base background with high opacity for the pie
@@ -512,7 +512,13 @@ impl PieMenuApp {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let keyboard_sub = keyboard::on_key_press(|key, _modifiers| Some(Message::KeyPressed(key)));
+        let keyboard_sub = cosmic::iced::event::listen_with(|event, _status, _window| {
+            if let Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) = event {
+                Some(Message::KeyPressed(key))
+            } else {
+                None
+            }
+        });
 
         // Keep ticking for animations and initial layout
         // - First 500ms for scaled display layout
@@ -590,12 +596,12 @@ impl<'a> Program<Message> for PieCanvas<'a> {
     fn update(
         &self,
         _state: &mut Self::State,
-        event: Event,
+        event: &Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-    ) -> (canvas::event::Status, Option<Message>) {
+    ) -> Option<cosmic::iced::widget::canvas::Action<Message>> {
         let Some(cursor_pos) = cursor.position_in(bounds) else {
-            return (canvas::event::Status::Ignored, None);
+            return None;
         };
 
         let menu_size = self.menu_radius * 2.0 + self.icon_size as f32 + 80.0;
@@ -623,34 +629,25 @@ impl<'a> Program<Message> for PieCanvas<'a> {
         if distance < self.inner_radius {
             match event {
                 Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(Message::CanvasEvent(PieCanvasMessage::ClickCenter)),
-                    );
+                    return Some(cosmic::iced::widget::canvas::Action::publish(Message::CanvasEvent(PieCanvasMessage::ClickCenter)).and_capture());
                 }
                 Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(Message::CanvasEvent(PieCanvasMessage::HoverSegment(None))),
-                    );
+                    return Some(cosmic::iced::widget::canvas::Action::publish(Message::CanvasEvent(PieCanvasMessage::HoverSegment(None))).and_capture());
                 }
                 _ => {}
             }
-            return (canvas::event::Status::Ignored, None);
+            return None;
         }
 
         // Check if outside the menu
         if distance > self.menu_radius + 10.0 {
             match event {
                 Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(Message::CanvasEvent(PieCanvasMessage::HoverSegment(None))),
-                    );
+                    return Some(cosmic::iced::widget::canvas::Action::publish(Message::CanvasEvent(PieCanvasMessage::HoverSegment(None))).and_capture());
                 }
                 _ => {}
             }
-            return (canvas::event::Status::Ignored, None);
+            return None;
         }
 
         // Calculate angle from center
@@ -680,31 +677,22 @@ impl<'a> Program<Message> for PieCanvas<'a> {
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 if let Some(slice) = hovered_slice {
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(Message::CanvasEvent(PieCanvasMessage::ClickSegment(slice.index))),
-                    );
+                    return Some(cosmic::iced::widget::canvas::Action::publish(Message::CanvasEvent(PieCanvasMessage::ClickSegment(slice.index))).and_capture());
                 }
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
                 if let Some(slice) = hovered_slice {
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(Message::CanvasEvent(PieCanvasMessage::RightClickSegment(slice.index))),
-                    );
+                    return Some(cosmic::iced::widget::canvas::Action::publish(Message::CanvasEvent(PieCanvasMessage::RightClickSegment(slice.index))).and_capture());
                 }
             }
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 let segment = hovered_slice.map(|s| s.index);
-                return (
-                    canvas::event::Status::Captured,
-                    Some(Message::CanvasEvent(PieCanvasMessage::HoverSegment(segment))),
-                );
+                return Some(cosmic::iced::widget::canvas::Action::publish(Message::CanvasEvent(PieCanvasMessage::HoverSegment(segment))).and_capture());
             }
             _ => {}
         }
 
-        (canvas::event::Status::Ignored, None)
+        None
     }
 
     fn draw(
@@ -946,8 +934,8 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                         color: theme.text_color,
                         size: 22.0.into(),
                         font: Font::DEFAULT,
-                        horizontal_alignment: Horizontal::Center,
-                        vertical_alignment: Vertical::Center,
+                        align_x: Horizontal::Center.into(),
+                        align_y: Vertical::Center,
                         ..Text::default()
                     });
                 }
@@ -1088,8 +1076,8 @@ impl<'a> Program<Message> for PieCanvas<'a> {
                         color: Color::WHITE,
                         size: font_size.into(),
                         font: Font::DEFAULT,
-                        horizontal_alignment: Horizontal::Center,
-                        vertical_alignment: Vertical::Center,
+                        align_x: Horizontal::Center.into(),
+                        align_y: Vertical::Center,
                         ..Text::default()
                     });
                 }
@@ -1125,8 +1113,8 @@ impl<'a> Program<Message> for PieCanvas<'a> {
 }
 
 /// Style function for transparent background
-fn app_style(_state: &PieMenuApp, _theme: &Theme) -> cosmic::iced_runtime::Appearance {
-    cosmic::iced_runtime::Appearance {
+fn app_style(_state: &PieMenuApp, _theme: &Theme) -> cosmic::iced::theme::Style {
+    cosmic::iced::theme::Style {
         background_color: Color::TRANSPARENT,
         text_color: Color::WHITE,
         icon_color: Color::WHITE,
@@ -1138,11 +1126,11 @@ fn app_style(_state: &PieMenuApp, _theme: &Theme) -> cosmic::iced_runtime::Appea
 pub fn show_pie_menu_at(apps: Vec<AppInfo>, position: Option<(f32, f32)>) {
     println!("Launching pie menu with {} apps at {:?}", apps.len(), position);
 
-    let _ = cosmic::iced::daemon(PieMenuApp::title, PieMenuApp::update, PieMenuApp::view)
+    let _ = cosmic::iced::daemon(move || PieMenuApp::new_at(apps.clone(), position), PieMenuApp::update, PieMenuApp::view)
         .subscription(PieMenuApp::subscription)
         .theme(PieMenuApp::theme)
         .style(app_style)
-        .run_with(move || PieMenuApp::new_at(apps, position));
+        .run();
 }
 
 // ============================================================================
@@ -1245,9 +1233,13 @@ impl CursorTracker {
     }
 
     fn subscription(&self) -> Subscription<TrackerMessage> {
-        let keyboard_sub = keyboard::on_key_press(|key, _modifiers| {
-            if matches!(key, Key::Named(keyboard::key::Named::Escape)) {
-                Some(TrackerMessage::Cancel)
+        let keyboard_sub = cosmic::iced::event::listen_with(|event, _status, _window| {
+            if let Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) = event {
+                if matches!(key, Key::Named(keyboard::key::Named::Escape)) {
+                    Some(TrackerMessage::Cancel)
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -1320,10 +1312,10 @@ impl Program<TrackerMessage> for TrackerCanvas {
     fn update(
         &self,
         _state: &mut Self::State,
-        event: Event,
+        event: &Event,
         bounds: Rectangle,
         cursor: mouse::Cursor,
-    ) -> (canvas::event::Status, Option<TrackerMessage>) {
+    ) -> Option<cosmic::iced::widget::canvas::Action<TrackerMessage>> {
         // Capture cursor position on any mouse event
         if let Some(pos) = cursor.position_in(bounds) {
             match event {
@@ -1332,15 +1324,12 @@ impl Program<TrackerMessage> for TrackerCanvas {
                     // Convert to screen coordinates
                     let screen_x = bounds.x + pos.x;
                     let screen_y = bounds.y + pos.y;
-                    return (
-                        canvas::event::Status::Captured,
-                        Some(TrackerMessage::CursorCaptured(screen_x, screen_y)),
-                    );
+                    return Some(cosmic::iced::widget::canvas::Action::publish(TrackerMessage::CursorCaptured(screen_x, screen_y)).and_capture());
                 }
                 _ => {}
             }
         }
-        (canvas::event::Status::Ignored, None)
+        None
     }
 
     fn draw(
@@ -1384,8 +1373,8 @@ impl Program<TrackerMessage> for TrackerCanvas {
 }
 
 /// Style for tracker window - nearly transparent but with slight tint for cursor events
-fn tracker_style(_state: &CursorTracker, _theme: &Theme) -> cosmic::iced_runtime::Appearance {
-    cosmic::iced_runtime::Appearance {
+fn tracker_style(_state: &CursorTracker, _theme: &Theme) -> cosmic::iced::theme::Style {
+    cosmic::iced::theme::Style {
         background_color: Color::from_rgba(0.0, 0.0, 0.0, 0.01), // Nearly invisible
         text_color: Color::WHITE,
         icon_color: Color::WHITE,
@@ -1397,9 +1386,9 @@ fn tracker_style(_state: &CursorTracker, _theme: &Theme) -> cosmic::iced_runtime
 pub fn show_pie_menu_with_tracking(_apps: Vec<AppInfo>) {
     println!("Starting cursor tracking overlay...");
 
-    let _ = cosmic::iced::daemon(CursorTracker::title, CursorTracker::update, CursorTracker::view)
+    let _ = cosmic::iced::daemon(CursorTracker::new, CursorTracker::update, CursorTracker::view)
         .subscription(CursorTracker::subscription)
         .theme(CursorTracker::theme)
         .style(tracker_style)
-        .run_with(CursorTracker::new);
+        .run();
 }

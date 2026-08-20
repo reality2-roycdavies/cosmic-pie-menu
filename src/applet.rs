@@ -11,10 +11,17 @@ use cosmic::iced::platform_specific::shell::commands::popup::{destroy_popup, get
 use cosmic::iced::window::Id;
 use cosmic::iced::Limits;
 use cosmic::iced::{Subscription, Task};
-use cosmic::iced_runtime::core::window;
+use cosmic::iced::window;
 use cosmic::{Action, Element};
 use std::process::Command;
 use std::sync::{Arc, RwLock};
+
+/// Process-global handle to the gesture-event receiver.
+/// iced's `Subscription::run` takes a non-capturing `fn`, so the stream can't
+/// close over `self.gesture_rx`; we stash a clone here in `init()`.
+static GESTURE_RX: std::sync::OnceLock<
+    Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<GestureMessage>>>,
+> = std::sync::OnceLock::new();
 
 use crate::config::{GestureConfig, PieMenuConfig};
 
@@ -97,10 +104,12 @@ impl cosmic::Application for PieMenuApplet {
             Err(e) => eprintln!("Gesture detection not available: {}", e),
         }
 
+        let gesture_rx = Arc::new(tokio::sync::Mutex::new(rx));
+        let _ = GESTURE_RX.set(gesture_rx.clone());
         let applet = PieMenuApplet {
             core,
             popup: None,
-            gesture_rx: Arc::new(tokio::sync::Mutex::new(rx)),
+            gesture_rx,
             gesture_active: false,
         };
 
@@ -111,14 +120,14 @@ impl cosmic::Application for PieMenuApplet {
         Some(Message::PopupClosed(id))
     }
 
-    fn style(&self) -> Option<cosmic::iced_runtime::Appearance> {
+    fn style(&self) -> Option<cosmic::iced::theme::Style> {
         Some(cosmic::applet::style())
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
         // Only emit messages when a gesture event actually arrives (no polling)
-        let rx = self.gesture_rx.clone();
-        Subscription::run_with_id("gesture-events", async_stream::stream! {
+        Subscription::run(|| async_stream::stream! {
+            let rx = GESTURE_RX.get().unwrap().clone();
             let mut rx = rx.lock().await;
             loop {
                 match rx.recv().await {
